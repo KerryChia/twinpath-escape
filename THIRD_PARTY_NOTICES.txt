@@ -1,0 +1,67 @@
+TwinPath Escape — Third-Party Notices
+=====================================
+
+The project source code is based on Before Nightfall by Walkercito and is
+licensed under the MIT License. See LICENSE and README.md.
+
+Noto Sans SC
+------------
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name
+"Source".
+Source: https://github.com/google/fonts/tree/main/ofl/notosanssc
+File: assets/font/NotoSansSC-Variable.ttf
+License: SIL Open Font License 1.1
+License text: assets/font/NotoSansSC-OFL.txt
+
+BoldPixels
+----------
+Copyright YukiPixels 2024.
+Source: https://github.com/YukiPixels/Boldpixels
+File: assets/font/BoldPixels.ttf
+License: Creative Commons Attribution-ShareAlike 4.0 International
+License text: assets/font/BoldPixels-CC-BY-SA-4.0.txt
+Attribution: BoldPixels Font by Yuki (@YukiPixels)
+The font file is unmodified and remains separately licensed under CC BY-SA 4.0.
+
+Dajeki's 8x8 Fantasy Character Sprites
+--------------------------------------
+Source: https://dajeki.itch.io/dajekis-8x8-fantasy-character-sprites
+Files: assets/characters/
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Kenney Fantasy UI Borders
+-------------------------
+Source: https://kenney-assets.itch.io/fantasy-ui-borders
+Files: assets/gui/panels/
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Kenney 1-Bit Pixel Input Prompts 16x
+-----------------------------------
+Source: https://kenney-assets.itch.io/1-bit-pixel-input-prompts-16
+Files: assets/gui/keys/
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+Local license text: assets/gui/keys/1-bit-input-prompts-pixel-16/License.txt
+
+Kenney 1-Bit Platformer Pack
+----------------------------
+Files: assets/adve/
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+Local license text: assets/adve/1bit_license.txt
+
+Abstraction / Tallbeard Music Loop Bundle
+-----------------------------------------
+Source: https://tallbeard.itch.io/music-loop-bundle
+Files: assets/audio/sountracks/
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+Each bundled quarterly directory retains its original _LICENSE.txt and
+_README.txt files.
+
+Original TwinPath Escape Replacement Assets
+-------------------------------------------
+Files under assets/vfx/, assets/portal/, assets/gui/icons/,
+assets/audio/ui/original/, and assets/audio/cues/ were generated specifically
+for this repository on 2026-08-31. They replace upstream third-party assets
+whose raw redistribution terms were restrictive or undocumented. These
+replacement files are distributed under the repository MIT License.

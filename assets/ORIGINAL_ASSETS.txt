@@ -1,0 +1,4 @@
+Original replacement assets
+===========================
+
+The landing VFX, portal animation, UI icons, UI sound effects, and ambient cue WAV files in this repository were generated specifically for TwinPath Escape on 2026-08-31. They are original project assets and are distributed under the repository MIT license. They replace upstream third-party files whose public raw-file redistribution terms were restrictive or undocumented.
