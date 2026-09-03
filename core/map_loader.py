@@ -69,6 +69,11 @@ class TMXMap:
         self.offset = (0, 0)
         self._scaled_surface = self._surface
         self._zoom_override = zoom
+        # Scaled-rect caches, invalidated by rescale(): every property access
+        # used to re-scale hundreds of tile rects, and the physics/AI hot
+        # paths read these lists dozens of times per frame — millions of
+        # throwaway Rect allocations per level, visible as GC pauses.
+        self._layer_rect_cache: dict[str, list[pygame.Rect]] = {}
         self.rescale(target_size or settings.screen_size)
 
     def _parse_layers(self) -> None:
@@ -127,6 +132,7 @@ class TMXMap:
             (target_size[1] - self.scaled_size[1]) // 2,
         )
         self._scaled_surface = pygame.transform.scale(self._surface, self.scaled_size)
+        self._layer_rect_cache.clear()
 
     def _scale_rect(self, rect: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(
@@ -136,12 +142,19 @@ class TMXMap:
             int(rect.height * self.scale),
         )
 
+    def _cached_layer_rects(self, key: str, source: list[pygame.Rect]) -> list[pygame.Rect]:
+        cached = self._layer_rect_cache.get(key)
+        if cached is None:
+            cached = [self._scale_rect(r) for r in source]
+            self._layer_rect_cache[key] = cached
+        return list(cached)
+
     @property
     def collision_rects(self) -> list[pygame.Rect]:
         rects: list[pygame.Rect] = []
         for layer in self.layers.values():
             if layer.has_collision:
-                rects.extend(self._scale_rect(r) for r in layer.rects)
+                rects.extend(self._cached_layer_rects(f"collision:{layer.name}", layer.rects))
         return rects
 
     @property
@@ -149,14 +162,14 @@ class TMXMap:
         rects: list[pygame.Rect] = []
         for layer in self.layers.values():
             if layer.is_water:
-                rects.extend(self._scale_rect(r) for r in layer.rects)
+                rects.extend(self._cached_layer_rects(f"water:{layer.name}", layer.rects))
         return rects
 
     def _layer_rects(self, name: str) -> list[pygame.Rect]:
         layer = self.layers.get(name)
         if not layer:
             return []
-        return [self._scale_rect(r) for r in layer.rects]
+        return self._cached_layer_rects(f"layer:{name}", layer.rects)
 
     @property
     def pressure_rects(self) -> list[pygame.Rect]:

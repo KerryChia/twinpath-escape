@@ -90,6 +90,14 @@ class HoldAntiOscillationTests(unittest.TestCase):
             if scene.portal is not None and scene.portal.p1_entered and scene.portal.p2_entered:
                 break
         self.assertTrue(scene._portal_activated, "portal must have been reached")
+        # Oscillation breaker: the in-place left/right shake must never trip
+        # it on a clean run (three reversals in the same spot = the twitch).
+        for index, recorder in enumerate(recorders):
+            self.assertLessEqual(
+                recorder.inner.oscillations, 2,
+                f"P{index + 1} tripped the oscillation breaker "
+                f"{recorder.inner.oscillations} times",
+            )
         for index, recorder in enumerate(recorders):
             hold = [(state, steer) for state, steer in recorder.log if state == "HOLD"]
             if not hold:

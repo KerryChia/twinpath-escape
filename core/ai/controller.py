@@ -85,6 +85,18 @@ class SearchActionProvider:
     # double-jump frame, the double jump is spent anyway (it expires on
     # landing, so holding it forever only delays the next edge).
     DOUBLE_WAIT_FRAMES = 45
+    # Oscillation breaker: N direction reversals within this window, all
+    # within this radius of each other, count as in-place left/right twitching.
+    OSCILLATION_WINDOW = 1.2
+    OSCILLATION_RADIUS = 56.0
+    OSCILLATION_FLIPS = 3
+    # Forced neutral after the breaker fires: release every key and let
+    # friction settle the player before the fresh plan takes over.
+    OSCILLATION_STOP = 0.35
+    # After a rollout sweep finds no landing candidate, do not re-run the
+    # (expensive) sweep for this long — the per-frame re-search storm was the
+    # visible stutter in the twitch loop.
+    SIM_FAIL_COOLDOWN = 0.5
     SAFETY = {"walk": 0.0, "stairs": 0.0, "door": 2.0, "ride": 3.0, "drop": 4.0, "jump": 5.0}
 
     def __init__(self, algorithm: str | None = None, player_index: int = 1, prefer: str | None = None) -> None:
@@ -136,6 +148,17 @@ class SearchActionProvider:
         # counter so tests can assert the absence of left/right oscillation.
         self._hold_direction = 0
         self.hold_flips = 0
+        # Oscillation breaker state: steering direction, recent reversal
+        # events (clock, x, y) and the forced-neutral countdown.
+        self._clock = 0.0
+        self._steer_dir = 0
+        self._flip_events: list[tuple[float, float, float]] = []
+        self._osc_stop = 0.0
+        self.oscillations = 0
+        self._osc_breaker_handled = 0
+        # Cooldown after a rollout sweep that found no landing candidate.
+        self._sim_fail_until = 0.0
+        self._sim_fail_action: Action | None = None
         # Sticky re-search guard: after a successful commit, short-circuit
         # repeated _simulate_edge rollouts for the same target while the
         # player stays near where the script was found.
@@ -231,6 +254,7 @@ class SearchActionProvider:
             self._consecutive_failures = 0; self._retry_cooldown = 0.0
             self._sim_cache = None; self._sim_cache_ttl = 0.0
             self._sim_double_index = None; self._sim_double_wait = 0
+            self._sim_fail_until = 0.0; self._sim_fail_action = None
         if directive.complete:
             self.execution_state = ExecutionState.COMPLETE
         elif directive.operation == "wait":
@@ -340,6 +364,7 @@ class SearchActionProvider:
             self._blacklisted_edges.discard(edge)
 
     def tick(self, dt: float, observation: Observation) -> Action:
+        self._clock += dt
         self._retry_cooldown = max(0.0, self._retry_cooldown - dt)
         if self._sim_cache_ttl > 0.0:
             self._sim_cache_ttl = max(0.0, self._sim_cache_ttl - dt)
@@ -353,6 +378,40 @@ class SearchActionProvider:
             return self._hold_action(observation, directive)
 
         me = observation.players[self.player_index]
+        # Oscillation breaker: while the forced neutral is active, release all
+        # keys. Friction settles the player, and once the clock expires the
+        # fresh plan (possibly a different route after the replan below) runs
+        # from a standstill instead of inheriting the twitch momentum.
+        if self._osc_stop > 0.0:
+            self._osc_stop = max(0.0, self._osc_stop - dt)
+            self._steer_dir = 0
+            if self._osc_stop == 0.0:
+                self._flip_events.clear()
+            return Action()
+        # Detect in-place shaking from the player's actual motion: alternating
+        # presses show up as horizontal velocity reversals. Three reversals in
+        # the same spot = the user-visible twitch — book the current edge as a
+        # failure, drop the stale plan and pick a fresh approach.
+        self._note_steer(Action(left=me.velocity[0] < -18, right=me.velocity[0] > 18), me.position)
+        if self.oscillations > self._osc_breaker_handled:
+            self._osc_breaker_handled = self.oscillations
+            self._osc_stop = self.OSCILLATION_STOP
+            if self.path and self.path_index > 0:
+                failed = (self.path[self.path_index - 1], self.path[self.path_index])
+                self._failed_edges[failed] = self._failed_edges.get(failed, 0) + 1
+                if self._failed_edges[failed] >= 2:
+                    self._blacklisted_edges.add(failed)
+                    self._consecutive_failures += 1
+                    if self._consecutive_failures >= 6:
+                        self._reset_requested = True
+                        self._consecutive_failures = 0
+                        self._blacklisted_edges.clear()
+            self._sim_script = None; self._sim_index = 0
+            self._sim_cache = None; self._sim_cache_ttl = 0.0
+            self._sim_double_index = None; self._sim_double_wait = 0
+            self._still_time = 0.0
+            self._plan(observation, directive)
+            return Action()
         if self.path and self.path_index >= len(self.path):
             self.path_index = len(self.path) - 1
         position = me.position
@@ -438,6 +497,35 @@ class SearchActionProvider:
 
     def get_action(self, observation: Observation | None) -> Action:
         return Action() if observation is None else self.tick(1 / 60, observation)
+
+    def _note_steer(self, action: Action, position) -> None:
+        """Record steering-direction reversals and fire the oscillation breaker.
+
+        The user-visible failure mode is the in-place left/right shake: the
+        player stands in roughly one spot while the controller alternates
+        press-left / press-right. A true direction reversal within a short
+        window and a small radius is logged; the third one inside the window
+        trips the breaker (countered in `tick`), which stops the shake, books
+        the current edge as a failure and demands a fresh plan — the automated
+        "after three reversals, stop doing that".
+        """
+        steer = (1 if action.right else 0) - (1 if action.left else 0)
+        if steer == 0:
+            return
+        if self._steer_dir != 0 and steer != self._steer_dir:
+            self._flip_events.append((self._clock, position[0], position[1]))
+        self._steer_dir = steer
+        horizon = self._clock - self.OSCILLATION_WINDOW
+        self._flip_events = [e for e in self._flip_events if e[0] >= horizon]
+        nearby = [
+            e for e in self._flip_events
+            if abs(e[1] - position[0]) <= self.OSCILLATION_RADIUS
+            and abs(e[2] - position[1]) <= 64.0
+        ]
+        if len(nearby) >= self.OSCILLATION_FLIPS:
+            self.oscillations += 1
+            self._flip_events.clear()
+            self._steer_dir = 0
 
     def _hold_action(self, observation: Observation, directive: ScriptDirective) -> Action:
         """Stay parked on the target band without oscillating.
@@ -606,7 +694,12 @@ class SearchActionProvider:
         # Sticky cache: while the player stands near where the cached script
         # was found and the TTL has not expired, reuse the committed script
         # instead of re-running the (expensive) rollout sweep every frame.
-        self._sim_probe_rect = (me.rect[0], me.rect[1])
+        # The probe key is quantized to a 6px grid so a standing player's
+        # per-pixel jitter cannot invalidate the cache — invalidation by exact
+        # coordinate equality was what forced full re-searches during the
+        # twitch loop (each a 17-candidate × 130-frame sweep), the visible
+        # stutter.
+        self._sim_probe_rect = (round(me.rect[0] / 6.0), round(me.rect[1] / 6.0))
         if (
             self._sim_cache is not None
             and self._sim_cache_ttl > 0.0
@@ -619,6 +712,12 @@ class SearchActionProvider:
             self._sim_double_index = self._sim_cache[3]
             self._sim_double_wait = 0
             return self._sim_script[0]
+        # A recent full sweep that found no landing candidate means this
+        # geometry will not land us yet (e.g. mid-twitch). Back off instead of
+        # re-running the sweep every frame — replay the sweep's best-effort
+        # steering and let the oscillation breaker / stuck clock do their job.
+        if self._clock < self._sim_fail_until:
+            return self._sim_fail_action or Action(right=direction > 0, left=direction < 0)
 
         def rollout(first: Action, delay: int, hold_dir: int, use_double: bool, horizon: int, hold_jump: bool = False, release: int = 0):
             sim = clone_observed_player(me)
@@ -742,6 +841,11 @@ class SearchActionProvider:
             if cost < best_cost:
                 best_cost = cost
                 best = first
+        # No candidate landed: schedule a cooldown before the next full sweep
+        # so the per-frame re-search storm (17 candidates × 130 frames) cannot
+        # repeat while the player is mid-twitch in hopeless geometry.
+        self._sim_fail_until = self._clock + self.SIM_FAIL_COOLDOWN
+        self._sim_fail_action = best
         return best
 
     def _action_for_path(self, observation: Observation, directive: ScriptDirective | None = None) -> Action:
