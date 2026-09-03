@@ -45,6 +45,39 @@ class LevelScriptController:
         if predicate.startswith("latched:"):
             door_id = predicate.removeprefix("latched:")
             return any(door.door_id == door_id and door.latched for door in observation.doors)
+        if predicate.startswith("pressed:"):
+            plate_id = predicate.removeprefix("pressed:")
+            plate = next((p for p in observation.plates if p.plate_id == plate_id), None)
+            return bool(plate and plate.pressed)
+        if predicate.startswith("partner_right_of:"):
+            door_id = predicate.removeprefix("partner_right_of:")
+            door = next((door for door in observation.doors if door.door_id == door_id), None)
+            partner = observation.players[1 - self.player_index]
+            return bool(door and partner.rect[0] >= door.rect[0] + door.rect[2])
+        if predicate.startswith("door_open:"):
+            tail = predicate.removeprefix("door_open:")
+            # Real-time open state: true only while something keeps the door
+            # held open (a hold-mode plate currently pressed). The ":off"
+            # variant inverts it — the relay choreography uses it to detect
+            # that the partner released the shared door.
+            off = tail.endswith(":off")
+            door_id = tail.removesuffix(":off") if off else tail
+            opened = any(door.door_id == door_id and door.open for door in observation.doors)
+            return (not opened) if off else opened
+        if predicate == "on:ledge":
+            # True once this player stands on the finale ledge (any platform
+            # node above the ground line on level_002).
+            me = observation.players[self.player_index]
+            platforms = [
+                node for node in observation.graph.nodes.values()
+                if node.kind == "platform" and node.rect[1] < 500
+            ] if observation.graph is not None else []
+            return any(
+                me.rect[0] < node.rect[0] + node.rect[2]
+                and me.rect[0] + me.rect[2] > node.rect[0]
+                and abs(node.rect[1] - (me.rect[1] + me.rect[3])) <= 12
+                for node in platforms
+            )
         if predicate.startswith("right_of:"):
             door_id = predicate.removeprefix("right_of:")
             door = next((door for door in observation.doors if door.door_id == door_id), None)
@@ -70,12 +103,41 @@ class LevelScriptController:
             door = next((door for door in observation.doors if door.door_id == door_id), None)
             if door:
                 rect = (door.rect[0] + door.rect[2] * 2, door.rect[1], max(8, door.rect[2]), door.rect[3])
+        elif target == "ledge:mount":
+            # Resolve to the nearest platform ABOVE the player that lies
+            # beyond the relay door — the finale-ledge side. Candidates left
+            # of the door (the small ledge under the door column) are traps:
+            # their jump arc clips the closed door body, and the AI would
+            # bounce under it forever. From the ground the nearest such
+            # platform is the springboard; from the springboard it is the
+            # ledge itself, so the climb happens in natural hops.
+            me = observation.players[self.player_index]
+            feet = me.rect[1] + me.rect[3]
+            door = next(
+                (d for d in observation.doors if d.door_id == "door:0"), None
+            )
+            door_right = (door.rect[0] + door.rect[2]) if door else 0
+            above = [
+                node.rect for node in observation.graph.nodes.values()
+                if node.kind == "platform" and node.rect[1] < feet - 60
+                and node.rect[0] >= door_right - 20
+            ] if observation.graph is not None else []
+            if above:
+                rect = min(above, key=lambda r: abs(r[0] + r[2] / 2 - me.position[0]))
         else:
             plate = next((plate for plate in observation.plates if plate.plate_id == target), None)
             rect = plate.rect if plate else None
         if rect is None or observation.graph is None:
             return None, rect
         center = self._center(rect)
+        if target == "ledge:mount":
+            # The springboard jump takes off from the ground below and lands
+            # on the ledge's lip: pick the nearest platform node to the lip.
+            node = min(
+                (node for node in observation.graph.nodes.values() if node.kind == "platform"),
+                key=lambda item: math.dist(item.position, center),
+            ).node_id
+            return node, rect
         preferred_kind = "exit" if target == "portal" or target.startswith("exit:") else "plate" if "plate" in target or target.startswith(("ordinary:", "coop:player:")) else "door_side"
         candidates = [node for node in observation.graph.nodes.values() if node.kind == preferred_kind]
         if not candidates:

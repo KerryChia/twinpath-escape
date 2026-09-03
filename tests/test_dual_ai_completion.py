@@ -85,7 +85,9 @@ class DualAICompletionTests(unittest.TestCase):
                 break
         self.assertEqual(scene.finale_state, FinaleState.SUCCESS)
         self.assertEqual(scene.final_exit_entered, [True, True])
-        self.assertTrue(scene.coop_doors._opened, "cooperation door must have opened")
+        # The ledge door is decorative now: permanently shut, players hop
+        # over it — it must NOT have opened.
+        self.assertFalse(scene.coop_doors._opened, "fake door must stay shut")
 
     def test_full_campaign_dual_ai_returns_to_main_menu(self):
         manager = SceneManager()

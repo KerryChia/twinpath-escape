@@ -272,7 +272,7 @@ class PlatformGraphExtractor:
     FLAT_ARC_DX = 235
     TILE = 40
 
-    def _jump_arc_clear(self, a: PlatformNode, b: PlatformNode, solids: list[pygame.Rect]) -> bool:
+    def _jump_arc_clear(self, a: PlatformNode, b: PlatformNode, solids: list[pygame.Rect], door_bodies: list[pygame.Rect] | None = None) -> bool:
         """Sweep the player box along the physical double-jump arc.
 
         The executor takes off from a's top, rises with the measured
@@ -304,12 +304,12 @@ class PlatformGraphExtractor:
         v0 = self.JUMP_V
         t_apex = v0 / self.GRAVITY
         h1 = v0 * v0 / (2 * self.GRAVITY)  # single-impulse rise = 144
-        # Full double-jump airtime: rise, boost at apex, rise again, fall
-        # back to the takeoff height (≈1.2s). Landing higher than takeoff
-        # only shortens the effective window; the arc keeps being swept so
-        # the executor can drift horizontally while descending onto the
-        # target top.
-        total_air = 3 * t_apex
+        # Full double-jump airtime: rise, boost at apex, rise again, and fall
+        # all the way back to the takeoff height. Two rises (0.4s each) plus
+        # the fall from 288px (0.57s) ≈ 1.37s — the old 3*t_apex cut the sweep
+        # off 0.17s before the arc returned to the takeoff level, which made
+        # every same-height landing (e.g. hopping level_002's fake door) fail.
+        total_air = 4 * t_apex
         start_feet = ay
         dx_total = bx - ax
         speed = self.RUN_SPEED
@@ -319,12 +319,27 @@ class PlatformGraphExtractor:
         # Rising with horizontal input pinned against a flank face keeps the
         # player right of that face; the executor only starts drifting once
         # its feet clear the tallest intervening solid in the corridor.
-        corridor = pygame.Rect(min(ax, bx) - self.PLAYER_W, min(ay, by) - 4, abs(bx - ax) + 2 * self.PLAYER_W, abs(ay - by) + 4)
+        # The corridor spans the whole flight: from the double-jump apex
+        # (min(ay,by) - DOUBLE_RISE) down to the lower of the two tops. The
+        # old band only covered ay..by, so a stacked door body above the
+        # takeoff stayed invisible to the clear-top calculation and the sweep
+        # started drifting before clearing it.
+        corridor = pygame.Rect(
+            min(ax, bx) - self.PLAYER_W,
+            min(ay, by) - self.DOUBLE_RISE - 4,
+            abs(bx - ax) + 2 * self.PLAYER_W,
+            abs(ay - by) + self.DOUBLE_RISE + 8,
+        )
         clear_top = by
         for solid in solids:
             if solid == a_box or solid == b_box or a_box.contains(solid) or b_box.contains(solid):
                 continue
-            if solid.colliderect(corridor) and solid.top >= by:
+            # A door body stacked across the corridor must be cleared at its
+            # highest tile, not the one the landing-height filter happens to
+            # admit — otherwise the sweep starts drifting on takeoff and
+            # face-plants into the door's flank.
+            in_door = door_bodies is not None and any(door_bodies[i] == solid for i in range(len(door_bodies)))
+            if solid.colliderect(corridor) and (solid.top >= by or in_door):
                 clear_top = min(clear_top, solid.top)
         t_clear = 0.0
         if clear_top < start_feet:
@@ -401,8 +416,6 @@ class PlatformGraphExtractor:
                 if dy >= 0 and self._line_hits_hazard(a.position, b.position, hazards):
                     continue
                 line = (a.position, b.position)
-                if any(blocker.clipline(line) for blocker in blockers):
-                    continue
                 movement = None
                 if 0 <= dy <= 45 and abs(dx) <= 520:
                     # Walking requires a continuous floor: probe that the
@@ -420,7 +433,16 @@ class PlatformGraphExtractor:
                         ):
                             supported = False
                             break
-                    if supported:
+                    # A door column blocks ground-level walking too: the walk
+                    # line runs along the floor and merely grazes the door's
+                    # bottom tile edge, which clipline treats as a miss. Judge
+                    # each door by its full column box (extended a touch past
+                    # the floor line) instead.
+                    door_boxes = [
+                        pygame.Rect(blk.left, blk.top - 3 * blk.height, blk.width, blk.height * 4 + 2)
+                        for blk in blockers
+                    ]
+                    if supported and not any(box.clipline(line) for box in door_boxes):
                         movement = "walk"
                 elif dy < 0 and abs(dx) <= self.MAX_JUMP_X + self.TILE and (
                     abs(dy) <= self.MAX_JUMP_UP
@@ -452,27 +474,61 @@ class PlatformGraphExtractor:
                         if (a.kind == "stairs" or b.kind == "stairs") and abs(dx) <= self.TILE * 3
                         else "jump"
                     )
-                elif 0 < dy <= 80 and abs(dx) <= self.MAX_JUMP_X and abs(dx) > self.TILE:
+                if movement is None and -45 <= dy <= 80 and abs(dx) <= self.MAX_JUMP_X and abs(dx) > self.TILE:
                     # Gap leap: the span is not walkable (the walk probe
-                    # above failed), but a shallow downward jump crosses
-                    # the gap. Validated by the same physical arc sweep.
+                    # above failed), but a flat or shallow jump crosses
+                    # the gap — including same-height gaps like the level_002
+                    # decorative door gap. Validated by the arc sweep.
                     movement = "jump"
                 elif dy > 0 and abs(dx) <= 260 and dy <= self.MAX_DROP:
-                    movement = "drop"
+                    # Drops cannot tunnel through a door column either: the
+                    # fall line through the door column box is vetoed.
+                    door_boxes = [
+                        pygame.Rect(blk.left, blk.top - 3 * blk.height, blk.width, blk.height * 4 + 2)
+                        for blk in blockers
+                    ]
+                    if any(box.clipline(line) for box in door_boxes):
+                        movement = None
+                    else:
+                        movement = "drop"
                 if movement == "jump" and a.kind != "stairs" and b.kind != "stairs":
                     a_rect = pygame.Rect(a.rect) if len(a.rect) == 4 else pygame.Rect(a.position[0] - 20, a.position[1], 40, 40)
-                    b_rect = pygame.Rect(b.rect) if len(a.rect) == 4 else pygame.Rect(b.position[0] - 20, b.position[1], 40, 40)
-                    # Hazards ride along in the swept solids: the parabolic
-                    # flight may not clip lava even though the straight chord
+                    b_rect = pygame.Rect(b.rect) if len(b.rect) == 4 else pygame.Rect(b.position[0] - 20, b.position[1], 40, 40)
+                    # Hazards ride in the swept solids: the parabolic flight
+                    # may not clip lava even though the straight chord
                     # pre-filter no longer rejects upward jumps.
-                    if not self._jump_arc_clear(PlatformNode(a.node_id, a.position, a.kind, tuple(a_rect)), PlatformNode(b.node_id, b.position, b.kind, tuple(b_rect)), solids + hazards):
-                        continue
-                    # A jump (including a shallow gap leap) through a closed
-                    # door body is not executable either: the arc sweep above
-                    # only knows collision solids, so door rects must veto the
-                    # edge here. Conditionally-open door edges added elsewhere
-                    # remain the legal way across.
-                    if any(blocker.clipline((a.position, b.position)) for blocker in blockers):
+                    # A jump whose chord passes through a closed door body is
+                    # only executable when its apex clears the door top
+                    # (hopping over the decorative ledge fake). Door tiles
+                    # also ride in the swept solids so the honest arc decides.
+                    # Collect the full door column the chord passes through:
+                    # the chord usually only grazes the door's bottom tile,
+                    # but the hop must clear the whole stacked body. The
+                    # column box extends 2px past the floor line so a
+                    # floor-level walk chord also registers.
+                    hit_columns = set()
+                    for blk in blockers:
+                        col_box = pygame.Rect(blk.left, blk.top - 3 * blk.height, blk.width, blk.height * 4 + 2)
+                        if blk.clipline((a.position, b.position)) or col_box.clipline((a.position, b.position)):
+                            hit_columns.add(blk.left)
+                    # Expand each hit column to its full stacked body: the
+                    # chord usually grazes only the bottom tile, but the hop
+                    # must clear the topmost tile of the whole door.
+                    hit_blocks = [
+                        blk for blk in blockers if blk.left in hit_columns
+                    ]
+                    if hit_blocks:
+                        door_top = min(blk.top for blk in hit_blocks)
+                        feet_a = a.rect[1] if len(a.rect) == 4 else a.position[1]
+                        feet_b = b.rect[1] if len(b.rect) == 4 else b.position[1]
+                        if feet_a - self.DOUBLE_RISE > door_top and feet_b - self.DOUBLE_RISE > door_top:
+                            continue
+                    # The arc sweep judges the flight honestly: door bodies
+                    # are passed separately so the sweep requires clearing the
+                    # door's top edge before drifting (hopping over the
+                    # decorative ledge fake), and clipping the body rejects
+                    # the edge.
+                    if not self._jump_arc_clear(PlatformNode(a.node_id, a.position, a.kind, tuple(a_rect)), PlatformNode(b.node_id, b.position, b.kind, tuple(b_rect)), solids + hazards, hit_blocks):
                         continue
                 if movement:
                     cost = max(0.1, math.dist(a.position, b.position) / (450 if movement == "walk" else 300))

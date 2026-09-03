@@ -29,18 +29,54 @@ class PlatformGraphTests(unittest.TestCase):
         self.assertEqual(len([n for n in self.graph.nodes.values() if n.kind == "exit"]), 2)
 
     def test_closed_and_open_conditional_doors(self):
-        for base in ("door:0", "door:1", "coop:0"):
+        # door:0 is the relay door; the ledge door (coop:0) is decorative and
+        # must never expose a conditionally-open edge, and door:1 is gone.
+        for base in ("door:0",):
             left, right = f"{base}:left", f"{base}:right"
             self.assertNotIn(right, dict(self.graph.neighbors(left)))
             self.assertIn(right, dict(self.graph.neighbors(left, frozenset({f"open:{base}"}))))
+        # door:1 is gone. The ledge door (coop:0) has side nodes with a
+        # conditional edge, but no plates exist to ever satisfy open:coop:0 —
+        # it is the decorative fake door players simply hop over.
+        self.assertNotIn("door:1:left", self.graph.nodes)
+        self.assertNotIn(
+            "coop:0:right",
+            dict(self.graph.neighbors("coop:0:left")),
+        )
+        self.assertIn(
+            "coop:0:right",
+            dict(self.graph.neighbors("coop:0:left", frozenset({"open:coop:0"}))),
+        )
 
     def test_no_direct_edges_cross_doors_or_lava(self):
+        # Jump edges may legally arc over a door (hopping the level_002
+        # decorative fake), so the chord-through-door check only applies to
+        # non-jump movements; for jump edges over a door, the extractor's
+        # apex gate must have confirmed the hop actually clears the top.
         for edges in self.graph.adjacency.values():
             for edge in edges:
                 a = self.graph.nodes[edge.source].position; b = self.graph.nodes[edge.target].position
-                if edge.movement != "door":
+                if edge.movement != "door" and edge.movement != "jump":
                     self.assertFalse(any(rect.clipline(a, b) for rect in self.map.door_rects + self.map.second_door_rects))
                 self.assertFalse(PlatformGraphExtractor._line_hits_hazard(a, b, self.map.lava_rects))
+
+    def test_jump_edges_over_doors_clear_the_top(self):
+        for edges in self.graph.adjacency.values():
+            for edge in edges:
+                if edge.movement != "jump":
+                    continue
+                a = self.graph.nodes[edge.source]; b = self.graph.nodes[edge.target]
+                for rect in self.map.door_rects + self.map.second_door_rects:
+                    if not rect.clipline((a.position, b.position)):
+                        continue
+                    feet_a = a.rect[1] if len(a.rect) == 4 else a.position[1]
+                    feet_b = b.rect[1] if len(b.rect) == 4 else b.position[1]
+                    door_top = rect.top
+                    self.assertTrue(
+                        feet_a - PlatformGraphExtractor.DOUBLE_RISE <= door_top + 8
+                        and feet_b - PlatformGraphExtractor.DOUBLE_RISE <= door_top + 8,
+                        (edge.source, edge.target),
+                    )
 
     def test_production_astar_matches_independent_dijkstra(self):
         conditions = frozenset({

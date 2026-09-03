@@ -31,21 +31,23 @@ class LevelIntegrationTests(unittest.TestCase):
         scene = Gameplay(SceneManager(), "level_002", ai_algorithm="A*")
         self.assertEqual(len(scene.final_exit_rects), 2)
         specs = scene.map.mechanism_specs
-        self.assertEqual({spec["controls"] for spec in specs}, {"door:0", "door:1"})
+        # The relay door is the only mechanism: both plates control door:0 in
+        # hold mode (the door stays open only while a plate is pressed). The
+        # ledge door is decorative — no mechanism drives it.
+        self.assertEqual({spec["controls"] for spec in specs}, {"door:0"})
         self.assertEqual({spec["required_player"] for spec in specs}, {1, 2})
-        self.assertTrue(all(spec["mode"] == "latch" for spec in specs))
-        self.assertEqual(len(scene.door_manager.doors), 2)
-        self.assertEqual(len(scene.coop_doors.plates), 2)
+        self.assertTrue(all(spec["mode"] == "hold" for spec in specs))
+        self.assertEqual(len(scene.door_manager.doors), 1)
+        self.assertEqual(len(scene.coop_doors.plates), 0)
 
     def test_all_algorithms_validate_cooperative_route(self):
         scene = Gameplay(SceneManager(), "level_002")
         graph = scene.platform_graph
         stages = [
             ("plate:0", "plate:1", frozenset({"open:door:0"})),
-            # The finale ledge route: ground plate -> double-jump springboard
-            # -> ledge left half -> through the co-op door -> right plate.
-            ("plate:1", "plate:3", frozenset({"open:door:0", "open:door:1", "open:coop:0"})),
-            ("plate:3", "exit:1", frozenset({"open:door:0", "open:door:1", "open:coop:0"})),
+            # From the back plate: springboard up to the finale ledge, hop
+            # the decorative fake door, and reach the exits on its right side.
+            ("plate:1", "exit:1", frozenset({"open:door:0"})),
         ]
         for algorithm in ("BFS", "DFS", "A*"):
             for start, goal, conditions in stages:
@@ -70,7 +72,9 @@ class LevelIntegrationTests(unittest.TestCase):
                     break
                 scene.update(1 / 60)
             self.assertLess(frames, 60 * 60 - 1, prefer)
-            self.assertTrue(scene.coop_doors._opened, prefer)
+            # The ledge door is decorative now — players hop over it, so it
+            # must stay shut while both exits register.
+            self.assertFalse(scene.coop_doors._opened, prefer)
             self.assertEqual(scene.final_exit_entered, [True, True], prefer)
             self.assertEqual(scene.finale_state, FinaleState.SUCCESS, prefer)
             self.assertEqual(set(scene.player2.action_provider.candidates), {"BFS", "DFS", "A*"}, prefer)

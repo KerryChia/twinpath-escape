@@ -177,8 +177,17 @@ def from_scene(scene: Any) -> Observation:
                 mode=mode,
             )
         )
+        # Distinguish the two plates of the same door by their side relative
+        # to the door column: "front" is left of the door (first pressed in
+        # the relay), "back" is right of it (held by whoever crossed first).
+        # Door exposes its tiles (original_positions), not a merged rect.
+        door_cx = (
+            sum(t.centerx for t in door.original_positions) // len(door.original_positions)
+            if door is not None else plate.rect.centerx
+        )
+        side = "front" if plate.rect.centerx < door_cx else "back"
         typed_plates.append(PlateObservation(
-            f"door_plate:{door_id}", "door", _rect(plate.rect), plate.pressed,
+            f"door_plate:{door_id}:{side}", "door", _rect(plate.rect), plate.pressed,
             plate.pressed or pi in dm._latched, required, door_id, mode,
         ))
     for i, door in enumerate(scene.coop_doors.doors):
