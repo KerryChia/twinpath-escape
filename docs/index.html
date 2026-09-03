@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="TwinPath Escape 的 AI 是怎么玩游戏的：平台图提取、BFS / DFS / A* 混合规划、C++17 原生搜索与模型预测跳跃执行器的完整原理讲解。">
+<meta name="theme-color" content="#f7f4ee">
+<title>AI 是怎么玩这个游戏的 — TwinPath Escape 搜索算法详解 | Kerry Chia</title>
+<link rel="canonical" href="https://kerrychia.github.io/twinpath-escape/">
+<meta property="og:title" content="AI 是怎么玩这个游戏的 — TwinPath Escape 搜索算法详解">
+<meta property="og:description" content="从平台图到 A* 启发式，从 C++17 CSR 到 MPC 跳跃执行器：一个会玩协作平台游戏的 AI 的完整拆解。">
+<meta property="og:url" content="https://kerrychia.github.io/twinpath-escape/">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  color-scheme: light;
+  --bg: #f7f4ee;
+  --bg-deep: #efede7;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --ink: #1e2932;
+  --ink-soft: #596772;
+  --ink-dim: #77848c;
+  --gold: #ad7723;
+  --gold-bright: #c28a30;
+  --gold-soft: #ead19e;
+  --gold-wash: #f5ead7;
+  --steel: #557b93;
+  --steel-deep: #31566d;
+  --steel-wash: #e8f0f4;
+  --green: #4f7967;
+  --line: rgba(43, 65, 78, 0.13);
+  --line-strong: rgba(43, 65, 78, 0.20);
+  --shadow: 0 28px 80px rgba(53, 67, 75, 0.12), 0 4px 18px rgba(53, 67, 75, 0.06);
+  --radius-xl: 42px;
+  --radius-lg: 28px;
+  --radius-md: 18px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --serif: "Songti SC", "STSong", "SimSun", Georgia, serif;
+  --mono: "SFMono-Regular", "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background:
+    radial-gradient(1100px 520px at 85% -8%, rgba(173, 119, 35, 0.10), transparent 62%),
+    radial-gradient(900px 480px at -10% 12%, rgba(85, 123, 147, 0.10), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  line-height: 1.75;
+  font-size: 16.5px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+.narrow { max-width: 860px; margin: 0 auto; }
+
+a { color: var(--steel-deep); text-decoration-color: rgba(85, 123, 147, 0.4); text-underline-offset: 3px; }
+a:hover { color: var(--gold); }
+
+/* ---------- header ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  backdrop-filter: blur(14px);
+  background: rgba(247, 244, 238, 0.82);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px; max-width: 1080px; margin: 0 auto;
+}
+.brand { font-family: var(--serif); font-size: 19px; letter-spacing: 0.02em; color: var(--ink); text-decoration: none; }
+.brand b { color: var(--gold); font-weight: 600; }
+.topnav { display: flex; gap: 22px; font-size: 14.5px; }
+.topnav a { color: var(--ink-soft); text-decoration: none; }
+.topnav a:hover { color: var(--gold); }
+
+/* ---------- hero ---------- */
+.hero { padding: 92px 0 64px; text-align: center; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 13.5px; letter-spacing: 0.22em; color: var(--gold);
+  border: 1px solid var(--gold-soft); background: var(--gold-wash);
+  border-radius: 999px; padding: 7px 18px;
+}
+.hero h1 {
+  font-family: var(--serif); font-weight: 700;
+  font-size: clamp(38px, 6vw, 62px); line-height: 1.18;
+  margin: 26px 0 18px; letter-spacing: 0.01em;
+}
+.hero h1 .accent { color: var(--gold); }
+.hero .sub { color: var(--ink-soft); font-size: 19px; max-width: 720px; margin: 0 auto 34px; }
+.hero-cta { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-block; padding: 13px 30px; border-radius: 999px;
+  font-size: 15.5px; text-decoration: none; transition: transform .25s ease, box-shadow .25s ease;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-primary { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #fff; box-shadow: 0 14px 34px rgba(173, 119, 35, 0.30); }
+.btn-ghost { border: 1.5px solid var(--line-strong); color: var(--ink); background: var(--surface-strong); }
+.btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ---------- meta strip ---------- */
+.meta-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  margin: 56px 0 0;
+}
+.meta-cell {
+  background: var(--surface-strong); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: 18px 20px; text-align: center;
+}
+.meta-cell .num { font-family: var(--serif); font-size: 30px; color: var(--gold); }
+.meta-cell .lab { font-size: 13.5px; color: var(--ink-dim); margin-top: 2px; }
+
+/* ---------- sections ---------- */
+section { padding: 76px 0; }
+.section-head { text-align: center; margin-bottom: 44px; }
+.section-kicker { font-size: 13px; letter-spacing: 0.3em; color: var(--steel); }
+.section-title {
+  font-family: var(--serif); font-size: clamp(27px, 3.6vw, 38px);
+  margin: 10px 0 12px; font-weight: 700;
+}
+.section-desc { color: var(--ink-soft); max-width: 640px; margin: 0 auto; }
+
+.card {
+  background: var(--surface-strong); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 34px 36px; box-shadow: var(--shadow);
+}
+.card + .card { margin-top: 22px; }
+.card h3 { font-family: var(--serif); font-size: 22px; margin: 0 0 12px; }
+.card p { color: var(--ink-soft); margin: 0 0 14px; }
+.card p:last-child { margin-bottom: 0; }
+.card strong { color: var(--ink); }
+.tag {
+  display: inline-block; font-size: 12px; font-family: var(--mono);
+  color: var(--steel-deep); background: var(--steel-wash);
+  border-radius: 6px; padding: 2px 9px; margin-right: 6px; vertical-align: 2px;
+}
+.tag-gold { color: var(--gold); background: var(--gold-wash); }
+
+/* pipeline grid */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.mini {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: 22px 24px;
+}
+.mini h4 { margin: 0 0 8px; font-size: 16.5px; color: var(--ink); }
+.mini p { margin: 0; font-size: 14.5px; color: var(--ink-soft); }
+.mini .stepno {
+  font-family: var(--serif); font-size: 26px; color: var(--gold-soft);
+  float: right; line-height: 1;
+}
+
+/* pipeline flow */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap; justify-content: center; margin: 10px 0 26px; }
+.flow-node {
+  background: var(--surface-strong); border: 1.5px solid var(--line-strong);
+  border-radius: 16px; padding: 14px 18px; text-align: center; min-width: 128px;
+}
+.flow-node .t { font-weight: 600; font-size: 15px; }
+.flow-node .d { font-size: 12.5px; color: var(--ink-dim); font-family: var(--mono); margin-top: 3px; }
+.flow-arrow { align-self: center; color: var(--gold); font-size: 20px; padding: 0 10px; }
+
+/* ---------- code ---------- */
+.codebox {
+  background: #232a31; color: #e8edf2; border-radius: var(--radius-md);
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.68;
+  padding: 22px 24px; overflow-x: auto; margin: 18px 0 4px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.codebox .cm { color: #8aa39b; }
+.codebox .kw { color: #e5b567; }
+.codebox .fn { color: #8fc7ee; }
+.codebox .st { color: #b8d8a0; }
+.codebox .nb { color: #d8a0df; }
+.code-cap { font-size: 13px; color: var(--ink-dim); font-family: var(--mono); margin-top: 8px; text-align: right; }
+
+/* ---------- comparison table ---------- */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; font-size: 14.5px; }
+.tbl th { background: var(--bg-deep); text-align: left; padding: 13px 18px; font-family: var(--serif); font-size: 15.5px; }
+.tbl td { padding: 12px 18px; border-top: 1px solid var(--line); color: var(--ink-soft); vertical-align: top; }
+.tbl td:first-child { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.tbl tr td:nth-child(2) code, .tbl tr td:nth-child(3) code, .tbl tr td:nth-child(4) code { font-family: var(--mono); font-size: 12.5px; }
+
+code.inline { font-family: var(--mono); font-size: 0.88em; background: var(--bg-deep); border-radius: 6px; padding: 1.5px 7px; color: var(--steel-deep); }
+
+/* ---------- callout ---------- */
+.callout {
+  border-left: 4px solid var(--gold); background: var(--gold-wash);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 18px 24px; margin: 20px 0; color: #6d5a33; font-size: 15px;
+}
+.callout b { color: #57431d; }
+
+/* ---------- footer ---------- */
+footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 44px 0 52px; text-align: center; color: var(--ink-dim); font-size: 14.5px; }
+footer .fin { font-family: var(--serif); font-size: 20px; color: var(--ink); margin-bottom: 8px; }
+footer a { color: var(--ink-soft); margin: 0 10px; }
+
+/* ---------- reveal ---------- */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+@media (max-width: 860px) {
+  .grid-2, .grid-3, .meta-strip { grid-template-columns: 1fr 1fr; }
+  .flow { flex-direction: column; align-items: center; }
+  .flow-arrow { transform: rotate(90deg); padding: 6px 0; }
+  .card { padding: 26px 22px; }
+  .topnav { display: none; }
+}
+@media (max-width: 560px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .meta-strip { grid-template-columns: 1fr 1fr; }
+  body { font-size: 15.5px; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#">TwinPath <b>AI</b> · 算法详解</a>
+    <nav class="topnav">
+      <a href="#pipeline">总览</a>
+      <a href="#graph">平台图</a>
+      <a href="#search">三大搜索</a>
+      <a href="#astar">A* 详解</a>
+      <a href="#mpc">跳跃执行</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">TWINPATH ESCAPE · AI ARCHITECTURE</span>
+    <h1>AI 是怎么<br><span class="accent">玩这个游戏</span>的</h1>
+    <p class="sub">一个会打协作平台游戏的 AI，从「看见地图」到「按下按键」要经历什么？这篇文章把它拆开讲透——尤其是 A* 搜索。</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/KerryChia/twinpath-escape" target="_blank" rel="noopener">GitHub 仓库</a>
+      <a class="btn btn-ghost" href="#astar">直接看 A*</a>
+    </div>
+    <div class="meta-strip">
+      <div class="meta-cell"><div class="num">3</div><div class="lab">搜索算法并行运行</div></div>
+      <div class="meta-cell"><div class="num">C++17</div><div class="lab">原生搜索核心</div></div>
+      <div class="meta-cell"><div class="num">0</div><div class="lab">作弊：只发按键</div></div>
+      <div class="meta-cell"><div class="num">3</div><div class="lab">关卡全自动通关</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ================= 总览 ================= -->
+<section id="pipeline">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">OVERVIEW</div>
+      <h2 class="section-title">先看全景：一条完整的决策流水线</h2>
+      <p class="section-desc">AI 不读代码也不看坐标，它和人类玩家拿到的东西完全一样——只有「按什么键」的权利。</p>
+    </div>
+
+    <div class="flow reveal">
+      <div class="flow-node"><div class="t">冻结观测</div><div class="d">Observation</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node"><div class="t">平台图提取</div><div class="d">Graph</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node"><div class="t">选目标</div><div class="d">Directive</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node"><div class="t">搜索路径</div><div class="d">BFS+DFS+A*</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node"><div class="t">执行动作</div><div class="d">Action</div></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="mini reveal"><span class="stepno">01</span><h4>冻结观测 Observation</h4><p>把游戏世界在某一帧「拍照」：两个玩家的位置、速度、脚下平台，所有门与踏板的开合状态，移动平台的进度，水与熔岩的范围。观测是<b>不可变的</b>——AI 后续所有推理都基于这张快照，不会边想边改。</p></div>
+      <div class="mini reveal"><span class="stepno">02</span><h4>平台图提取 Graph</h4><p>从 TMX 地图几何中提取「能站的地方」和「能走的路」，生成一张图：节点是平台段、踏板、门两侧、出口；边是走、跳、下落、爬台阶、乘平台。这一步把「物理世界」翻译成「数学世界」，是搜索的前提。</p></div>
+      <div class="mini reveal"><span class="stepno">03</span><h4>协作任务选择 Directive</h4><p>这是一个协作游戏，得先决定「我现在该干嘛」：是去踩踏板开门，还是在门边等队友，还是冲向出口。任务选择器读取当前机关状态推断目标——不写死任何关卡流程。</p></div>
+      <div class="mini reveal"><span class="stepno">04</span><h4>搜索 + 执行</h4><p>拿到起点和终点，让 BFS、DFS、A* 三个算法<b>同时</b>在图上跑，融合出一条最稳的路线；再由执行器把它翻译成一帧一帧的按键序列。跳不过去的沟？还有一个模型预测执行器专门负责「怎么跳」。</p></div>
+    </div>
+
+    <div class="callout reveal" style="margin-top:34px">
+      <b>唯一的铁律：</b>AI 只能输出 <code class="inline">Action(left, right, jump, down)</code> 四个布尔值——和人类键盘完全等价。它不能瞬移、不能改坐标、不能伪造输入。测试套件甚至用 AST 静态检查禁止 AI 代码给玩家的 <code class="inline">pos / rect / velocity</code> 赋值。
+    </div>
+  </div>
+</section>
+
+<!-- ================= 平台图 ================= -->
+<section id="graph" style="background: var(--bg-deep);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">STEP 1 · WORLD → GRAPH</div>
+      <h2 class="section-title">平台图：把地图变成一张数学的图</h2>
+      <p class="section-desc">搜索算法不懂「平台」「熔岩」，它只懂节点和边。所以第一步是把物理世界翻译过去。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>节点：所有「能站的地方」</h3>
+      <p>提取器扫描地图几何，把每一块<b>站得上去的表面</b>切成平台段，再加上语义节点：压力板 <span class="tag tag-gold">plate:0</span> 门的两侧 <span class="tag tag-gold">door:0.left</span> 台阶的每一级 <span class="tag tag-gold">stairs:2</span> 出口 <span class="tag tag-gold">exit:1</span>。每个节点带位置、类型和覆盖范围。</p>
+      <p>判定「玩家站在哪个节点」用的是<b>脚下真实重叠</b>：以脚底为中心的矩形与平台段求交，而不是拿中心点做几何猜测——中心点探测会在平台边缘产生「假到达」，让路径被错误快进。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>边：六种「能走的路」，每条都对应真实物理</h3>
+      <p>两个节点之间有没有边，不是拍脑袋连的，而是用<b>与真实游戏完全一致的物理参数</b>验证出来的：跳跃力 720、重力 1800、单跳最高上升 144px、二段跳约 288px。</p>
+      <table class="tbl">
+        <tr><th>边类型</th><th>含义</th><th>物理约束举例</th></tr>
+        <tr><td>walk</td><td>平地直接走过去</td><td>两平台间逐像素探测有连续支撑</td></tr>
+        <tr><td>jump</td><td>跳上去 / 跳过沟</td><td>上升量 ≤ 单跳 144px 或二段跳 288px；水下起跳拒绝高弧线</td></tr>
+        <tr><td>drop</td><td>踩穿单向板落下去</td><td>只允许向下，落点必须真的接得住</td></tr>
+        <tr><td>stairs</td><td>按住跳爬台阶</td><td>限制在同列短距攀爬</td></tr>
+        <tr><td>ride</td><td>乘移动平台</td><td>只在正确停靠位置与方向可用，代价随进度实时更新</td></tr>
+        <tr><td>door</td><td>穿过已开启的门</td><td>带条件边：门没开？这条边在图里根本不可通行</td></tr>
+      </table>
+      <p style="margin-top:14px">条件边是协作玩法的数学基础：「门后的踏板」这个节点，只有当携带条件 <code class="inline">open:door:0</code> 被满足时才可达。AI 推理时把「哪些门已开」编码进搜索条件，一张静态地图就表达出了<b>随协作状态变化的动态世界</b>。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 三大搜索 ================= -->
+<section id="search">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">STEP 2 · SEARCH</div>
+      <h2 class="section-title">三大搜索算法：不是三选一，是三合一</h2>
+      <p class="section-desc">每次规划，BFS、DFS、A* 都在同一张图、同一组条件、同一份黑名单上完整跑一遍，然后融合。</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card reveal" style="padding:28px 26px">
+        <h3><span class="tag">BFS</span>广度优先</h3>
+        <p style="font-size:14.5px">一层一层向外扩散，<b>天然找最少步数</b>的路径。不知道地形好坏，但保证边数最少——适合当「保守备胎」。</p>
+      </div>
+      <div class="card reveal" style="padding:28px 26px">
+        <h3><span class="tag">DFS</span>深度优先</h3>
+        <p style="font-size:14.5px">一条道走到黑，撞墙才回头。找到的路径往往怪但<b>出奇地有用</b>——绕远路的方案有时恰好避开危险区。为了可解释性，邻居按目标方向排序。</p>
+      </div>
+      <div class="card reveal" style="padding:28px 26px">
+        <h3><span class="tag tag-gold">A*</span>主力选手</h3>
+        <p style="font-size:14.5px">带「方向感」的最优搜索，<b>按代价找最低成本路径</b>。是融合时的默认赢家，也是本文的主角——往下看。</p>
+      </div>
+    </div>
+
+    <div class="card reveal" style="margin-top:26px">
+      <h3>融合策略：谁说了算？</h3>
+      <table class="tbl">
+        <tr><th>优先级</th><th>规则</th></tr>
+        <tr><td>① A* 为基线</td><td>三家中 <code>A*</code> 的最低代价路径默认获胜</td></tr>
+        <tr><td>② 黑名单一票否决</td><td>如果 A* 路线的下一条边刚失败过（被拉黑），自动换成 BFS / DFS 中下一条边干净的那个</td></tr>
+        <tr><td>③ 风险加权平局裁决</td><td>代价打平时，按边类型安全度评分：<code>walk / stairs</code> &lt; <code>door / ride</code> &lt; <code>drop / jump</code>——能走就不跳</td></tr>
+      </table>
+      <p style="margin-top:14px">这带来一个很有意思的性质：AI 的「性格」会随环境流动。顺畅时它像 A* 一样精明；频繁失败时它自动带上 BFS 的保守或 DFS 的脑洞。面板上的 <code class="inline">Hybrid/A*</code> 就是当前融合赢家。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>为什么搜索核心是 C++17？</h3>
+      <p>AI 每秒要做几十次完整规划，纯 Python 会成为瓶颈。三个算法被实现在一个 C++17 的 <b>CSR（压缩稀疏行）</b> 图结构上，通过稳定版本的 C ABI 用 ctypes 调用——没有 Python 头文件依赖，加载是严格的：缺二进制、ABI 不匹配、自检失败都直接报错，<b>绝不静默降级</b>。</p>
+      <p>精确语义被完整保留：BFS 在「生成节点时」判中，DFS 反转邻居入栈，A* 在「弹出节点时」判中——这些细节都被回归测试逐字节对齐。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= A* 详解 ================= -->
+<section id="astar" style="background: var(--bg-deep);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">DEEP DIVE</div>
+      <h2 class="section-title">A* 详解：给盲目搜索装上方向感</h2>
+      <p class="section-desc">这是整个 AI 的大脑。理解了这一节，你就理解了它为什么既快又准。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>从 Dijkstra 说起：代价最优的代价</h3>
+      <p>Dijkstra 算法保证找到<b>总代价最小</b>的路——它像个谨慎的测绘员，把起点周围所有区域一寸寸丈量过去。但地图一大，它 360° 无死角的扩散就太浪费了：目标明明在右边，它却花一半时间丈量左边。</p>
+      <p>A* 只做了一件事：<b>给每个候选位置打两个分</b>——</p>
+      <div class="codebox"><span class="cm"># A* 的核心评分：f(n) = g(n) + h(n)</span>
+f(n) = <span class="fn">g</span>(n) + <span class="fn">h</span>(n)
+
+<span class="cm"># g(n)：从起点走到 n 已经花了多少真实代价（Dijkstra 的部分）</span>
+<span class="cm"># h(n)：从 n 到终点「还大概要花多少」的乐观估计（方向感的来源）</span></div>
+      <p style="margin-top:14px"><code class="inline">g</code> 让它记得走过的路有多贵，<code class="inline">h</code> 让它永远先试探「看起来离目标更近」的方向。<b>g 是历史，h 是直觉。</b></p>
+    </div>
+
+    <div class="card reveal">
+      <h3>一步步走一遍 A*（用游戏里的场景）</h3>
+      <p>场景：AI 在左边平台，目标是右上方一块踩住开门的压力板，中间隔着沟和一层台阶。</p>
+      <div class="grid-2" style="margin-top:16px">
+        <div class="mini"><h4>第 1 步 · 起点入队</h4><p>起点进「开放列表」（待考察的候选）。此时 g=0，h=起点到踏板的直线估计距离。</p></div>
+        <div class="mini"><h4>第 2 步 · 取 f 最小的节点</h4><p>每次从开放列表里取出 f 值最小的节点展开——这就是「方向感」：明明周围的邻居都能展开，但永远优先试探离目标更近的那个。</p></div>
+        <div class="mini"><h4>第 3 步 · 展开邻居，松弛边</h4><p>沿所有可通行边走一步：跳上台阶的边代价 5.0，走路代价 1.2。若新路线让某个邻居的 g 变小，就更新它的 g 并记下「我是从哪来的」。</p></div>
+        <div class="mini"><h4>第 4 步 · 弹出终点时收官</h4><p>终点被从开放列表<b>弹出</b>的那一刻搜索结束，沿着「从哪来」指针回溯就是完整路径。本项目刻意采用弹出时判中（而非生成时），保证最优性成立。</p></div>
+      </div>
+    </div>
+
+    <div class="card reveal">
+      <h3>看一眼区别：盲目扩散 vs 带方向感的探索</h3>
+      <p>同一张地图（灰色为墙，蓝点起点，金点终点），左边 BFS 从起点一图一图地漫染，右边 A* 沿启发式的指向穿过缺口。数一数展开格数——这就是启发式换来的效率。</p>
+      <div class="grid-2" style="margin-top:16px">
+        <div class="mini" style="text-align:center">
+          <h4 style="margin-bottom:10px">BFS · 广度优先</h4>
+          <canvas id="cvs-bfs" width="300" height="140" style="width:100%; height:auto; border-radius:10px; background:#fff"></canvas>
+          <p style="margin-top:10px"><button class="btn btn-ghost" id="btn-bfs" style="padding:7px 18px; font-size:13.5px">播放</button>&nbsp;&nbsp;<span id="cnt-bfs" style="font-family:var(--mono); font-size:13px; color:var(--steel-deep)">已展开 0 格</span></p>
+        </div>
+        <div class="mini" style="text-align:center">
+          <h4 style="margin-bottom:10px">A* · f = g + h</h4>
+          <canvas id="cvs-astar" width="300" height="140" style="width:100%; height:auto; border-radius:10px; background:#fff"></canvas>
+          <p style="margin-top:10px"><button class="btn btn-ghost" id="btn-astar" style="padding:7px 18px; font-size:13.5px">播放</button>&nbsp;&nbsp;<span id="cnt-astar" style="font-family:var(--mono); font-size:13px; color:var(--gold)">已展开 0 格</span></p>
+        </div>
+      </div>
+      <p style="margin-top:14px; font-size:13.5px; color: var(--ink-dim)">演示用曼哈顿距离作启发式（网格四向移动下可采纳）；游戏本体用的是「欧氏距离 × 最小代价密度」，原理相同。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>可采纳启发式：为什么它敢保证「最优」</h3>
+      <p>A* 的魔力全部押在 <code class="inline">h</code> 的一个性质上：<b>可采纳性（admissibility）</b>——h 永远不高估真实剩余代价。打个比方：h 是你说「最多还剩这么远」，只要你不吹牛，A* 就绝不会漏掉真正最短的路。</p>
+      <p>本项目的启发式是<b>直线距离 × 图中最小代价密度</b>：</p>
+      <div class="codebox"><span class="cm"># 欧氏距离 × 全图最小正 cost-per-pixel</span>
+h(n) = <span class="fn">euclidean</span>(n, goal) × min_cost_per_pixel
+
+<span class="cm"># 直线是两点间最短的可能路径，</span>
+<span class="cm"># 乘以「每像素至少花多少代价」，</span>
+<span class="cm"># 得到「剩余代价的理论下界」——永远不会高估。</span></div>
+      <p style="margin-top:14px">它够乐观（绝不高估 → 可采纳 → A* 最优性成立），又够聪明（大方向指得准 → 剪掉绝大部分无用探索）。测试用独立实现的 Dijkstra 做基准，逐条验证生产 A* 的路径代价与之完全一致。</p>
+      <div class="callout">
+        <b>直观感受两种极端：</b>h = 0 时 A* 退化成 Dijkstra（准但慢）；h 永远给 0 以上的高估值时它变成贪婪最佳优先（快但可能绕路）。可采纳启发式恰好卡在中间——<b>Dijkstra 的正确性 + 方向感的速度</b>。
+      </div>
+    </div>
+
+    <div class="card reveal">
+      <h3>A* 伪代码（本项目实现的精神内核）</h3>
+      <div class="codebox"><span class="kw">open</span> ← 优先队列 { start }        <span class="cm"># 按 f 升序取出，同 f 按插入序（稳定平局）</span>
+g[start] ← <span class="nb">0</span>;  f[start] ← h(start)
+<span class="kw">while</span> open 非空:
+    current ← open.<span class="fn">pop_min_f</span>()       <span class="cm"># 弹出时判中（保证最优性）</span>
+    <span class="kw">if</span> current == goal: <span class="kw">return</span> <span class="fn">backtrack</span>(parent)
+    <span class="kw">for</span> (next, cost) <span class="kw">in</span> neighbors(current, conditions):
+        t ← g[current] + cost
+        <span class="kw">if</span> t &lt; g[next]:              <span class="cm"># 松弛：找到更便宜的抵达方式</span>
+            g[next] ← t;  parent[next] ← current
+            f[next] ← t + h(next)
+            open.<span class="fn">push_or_update</span>(next)</div>
+      <p style="margin-top:14px">三个工程细节让它从教科书走进生产：① 邻居展开前先过<b>条件过滤</b>（门没开、黑名单边直接跳过）；② 优先队列的<b>稳定平局序</b>让每次搜索结果完全确定——同地图同状态永远得到同一条路，可回归测试；③ 弹出时判中 + 可采纳 h，二者合起来才有「第一条到终点的路一定最便宜」。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>代价从哪来：不是步数，是「这个动作有多危险」</h3>
+      <p>每条边的代价都编码了设计者的经验判断——移动平台在晃，乘它就该更贵：</p>
+      <table class="tbl">
+        <tr><th>边类型</th><th>基础代价</th><th>为什么</th></tr>
+        <tr><td>walk</td><td><code>~1.2 / px</code></td><td>最安全，代价密度最低</td></tr>
+        <tr><td>stairs</td><td>低</td><td>机械可靠，只是慢</td></tr>
+        <tr><td>door</td><td><code>+2.0</code></td><td>依赖门保持开启，有协作耦合</td></tr>
+        <tr><td>ride</td><td><code>+3.0</code></td><td>平台在动，等待+时机成本</td></tr>
+        <tr><td>drop</td><td><code>+4.0</code></td><td>下落不可逆，落点误差要命</td></tr>
+        <tr><td>jump</td><td><code>+5.0</code></td><td>最贵：起跳点、弧线、落点都可能翻车</td></tr>
+      </table>
+      <p style="margin-top:14px">跑动中平台的位置变化还会<b>实时改写 ride 边的可用性与代价</b>——图不是一张死表，而是随游戏状态呼吸的活结构。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>失败也是信息：黑名单与重规划</h3>
+      <p>搜索出路径 ≠ 能走通。执行中如果同一条边反复失败（比如起跳点总差半步），A* 把它记进<b>黑名单</b>，下次搜索时那条边带着 <code class="inline">blocked:a&gt;b</code> 条件直接不可通行——融合器随之自动换用 BFS / DFS 的备选路线。连续 6 次彻底没路时，AI 会申请一次「回到存档点重来」，而不是在原地无限抽搐。</p>
+      <p>触发重规划的时机：目标变了、门的开合改变了图的条件、或 1.5 秒没有实质性进展。失败被记成数据，而不是情绪。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MPC ================= -->
+<section id="mpc">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">STEP 3 · EXECUTION</div>
+      <h2 class="section-title">搜索只是选路，执行才是「会玩」</h2>
+      <p class="section-desc">A* 说「从节点 33 跳到节点 59」，但游戏帧循环里没有「跳」这种东西——只有每一帧的按键组合。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>模型预测执行器：先在脑内玩一遍</h3>
+      <p>遇到跳跃边，AI 不会莽。它启动一个<b>无头物理克隆</b>（和真实玩家逐位一致的物理引擎），把候选方案逐个「脑内模拟」一遍：先走 10 帧再跳？先后退助跑再起跳？空中什么时候松方向？二段跳在哪一帧按？</p>
+      <div class="codebox"><span class="cm"># 每个候选策略在克隆体上完整跑 130 帧，</span>
+<span class="cm"># 模拟里用的是真实碰撞几何：实心墙与单向平台严格分离。</span>
+candidates = [
+    (walk <span class="nb">10</span> frames, jump),          <span class="cm"># 走到边缘再跳</span>
+    (backswing <span class="nb">14</span> frames, jump),      <span class="cm"># 先退后助跑</span>
+    (jump + release <span class="nb">@8</span>),             <span class="cm"># 空中松手漂移</span>
+    (jump + double <span class="nb">@apex</span>),            <span class="cm"># 顶点二段跳</span>
+]
+<span class="kw">for</span> plan <span class="kw">in</span> candidates:
+    outcome = <span class="fn">simulate</span>(plan)   <span class="cm"># 在脑内玩一遍</span>
+    <span class="kw">if</span> outcome.lands_on(target):
+        <span class="kw">return</span> <span class="fn">commit</span>(plan)   <span class="cm"># 赢家整段提交，逐帧重放</span></div>
+      <p style="margin-top:14px">赢家的<b>完整按键序列</b>被提交并逐帧重放——只回放第一帧的话，下一帧又会重新搜索，永远消费不到那个关键的「延迟跳跃帧」。重放期间还有三重保险：真到达目标立刻中止吸收漂移；脚本耗尽仍未落地就按最后漂移惯性滑行到触地；助跑后退阶段挂起「卡死时钟」（故意背离目标不等于迷路）。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>细节控：二段跳的 4 帧窗口</h3>
+      <p>游戏的二段跳只在速度接近抛物线顶点（|v<sub>y</sub>| ≤ 144）时生效——满速下按了也白按，这个窗口一秒只有约 4 帧。模拟器在正确的帧按下二段跳；实机执行时若物理有几帧漂移，重放器会<b>盯着真实 |v<sub>y</sub>| 等窗口出现再注入按键</b>，而不是死板按帧号按——这一条直接把宽沟跨越的成功率拉了起来。</p>
+      <p>另一处细节：驻守压力板时用<b>死区控制</b>——在目标带内干脆松开所有键靠摩擦停车，只有真的滑出去了才单侧修正。早期版本用「速度过快就反向按键」，结果在踏板上左右横跳像在跳舞。</p>
+    </div>
+
+    <div class="card reveal">
+      <h3>成绩单</h3>
+      <div class="grid-3" style="margin-top:14px">
+        <div class="mini"><h4>三关全通</h4><p>tutorial、Farlands、Crucible 三关双 AI 真实物理通关，无传送、无脚本按键。</p></div>
+        <div class="mini"><h4>全战役约 11850 帧</h4><p>从新手谷到双出口 SUCCESS 再回主菜单，全自动。</p></div>
+        <div class="mini"><h4>44 项回归测试</h4><p>含 4 项全战役通关回归 + 行为质量断言（不抖动、真的会用二段跳）。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="fin">会玩的 AI，是搜索出来的。</div>
+    <div>
+      <a href="https://github.com/KerryChia/twinpath-escape" target="_blank" rel="noopener">GitHub</a>·
+      <a href="https://profile.kerrychia.site/" target="_blank" rel="noopener">简历</a>·
+      <a href="https://kerrychia.site/" target="_blank" rel="noopener">主页</a>·
+      <a href="https://course.kerrychia.site/" target="_blank" rel="noopener">Vibe Coding 课程</a>
+    </div>
+    <div style="margin-top:14px; font-size:13px;">TwinPath Escape 原作为 Walkercito 的 Game Jam 项目 · AI 架构与算法实现 by Kerry Chia</div>
+  </div>
+</footer>
+
+<script>
+/* ---- BFS vs A* 展开可视化 ---- */
+(function () {
+  const COLS = 30, ROWS = 14, CELL = 10;
+  const WALLS = new Set();
+  const K = (x, y) => y * COLS + x;
+  for (let y = 0; y <= 9; y++) WALLS.add(K(8, y));   // 墙A：下开口
+  for (let y = 5; y < 14; y++) WALLS.add(K(16, y));  // 墙B：上开口
+  for (let y = 0; y <= 8; y++) WALLS.add(K(22, y));  // 墙C：下开口
+  const START = [2, 7], GOAL = [27, 3];
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  const h = (x, y) => Math.abs(x - GOAL[0]) + Math.abs(y - GOAL[1]);
+
+  function bfsOrder() {
+    const q = [[...START]], seen = new Set([K(...START)]), par = {}, order = [];
+    while (q.length) {
+      const [x, y] = q.shift(); order.push([x, y]);
+      if (x === GOAL[0] && y === GOAL[1]) break;
+      for (const [dx, dy] of DIRS) {
+        const nx = x+dx, ny = y+dy, k = K(nx, ny);
+        if (nx<0||ny<0||nx>=COLS||ny>=ROWS||WALLS.has(k)||seen.has(k)) continue;
+        seen.add(k); par[k] = K(x, y); q.push([nx, ny]);
+      }
+    }
+    return { order, par };
+  }
+  function astarOrder() {
+    const open = [{x:START[0], y:START[1], g:0, f:h(...START), s:0}];
+    const gBest = { [K(...START)]: 0 }, par = {}, seen = new Set(), order = [];
+    let s = 1;
+    while (open.length) {
+      open.sort((a,b) => a.f - b.f || a.s - b.s);
+      const cur = open.shift();
+      const k = K(cur.x, cur.y);
+      if (seen.has(k)) continue;
+      seen.add(k); order.push([cur.x, cur.y]);
+      if (cur.x === GOAL[0] && cur.y === GOAL[1]) break;
+      for (const [dx, dy] of DIRS) {
+        const nx = cur.x+dx, ny = cur.y+dy, nk = K(nx, ny);
+        if (nx<0||ny<0||nx>=COLS||ny>=ROWS||WALLS.has(nk)) continue;
+        const t = cur.g + 1;
+        if (gBest[nk] === undefined || t < gBest[nk]) {
+          gBest[nk] = t; par[nk] = k;
+          open.push({x:nx, y:ny, g:t, f:t+h(nx,ny), s:s++});
+        }
+      }
+    }
+    return { order, par };
+  }
+
+  function setup(canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(43,65,78,0.07)';
+    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CELL, 0); ctx.lineTo(x*CELL, ROWS*CELL); ctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y*CELL); ctx.lineTo(COLS*CELL, y*CELL); ctx.stroke(); }
+    ctx.fillStyle = '#d8d2c4';
+    WALLS.forEach(k => ctx.fillRect((k % COLS)*CELL, Math.floor(k/COLS)*CELL, CELL, CELL));
+    return ctx;
+  }
+  function dot(ctx, x, y, color, r) {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x*CELL + CELL/2, y*CELL + CELL/2, r || 4, 0, Math.PI*2); ctx.fill();
+  }
+  function run(canvasId, btnId, cntId, data, palette) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = setup(canvas);
+    let i = 0;
+    const timer = setInterval(() => {
+      for (let n = 0; n < 9 && i < data.order.length; n++, i++) {
+        const [x, y] = data.order[i];
+        const age = Math.max(0, 1 - (data.order.length - i) / 60);
+        ctx.fillStyle = palette.cell(age);
+        ctx.fillRect(x*CELL+1, y*CELL+1, CELL-2, CELL-2);
+      }
+      document.getElementById(cntId).textContent = '已展开 ' + i + ' 格';
+      if (i >= data.order.length) {
+        clearInterval(timer);
+        const gk = K(...GOAL), sk = K(...START);
+        ctx.strokeStyle = palette.path; ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        let k = gk, first = true;
+        while (k !== undefined && k !== sk) {
+          const x = k % COLS, y = Math.floor(k / COLS);
+          if (first) { ctx.moveTo(x*CELL+CELL/2, y*CELL+CELL/2); first = false; }
+          else ctx.lineTo(x*CELL+CELL/2, y*CELL+CELL/2);
+          k = data.par[k];
+        }
+        ctx.lineTo(START[0]*CELL+CELL/2, START[1]*CELL+CELL/2);
+        ctx.stroke(); ctx.lineWidth = 1;
+        dot(ctx, ...START, palette.start); dot(ctx, ...GOAL, palette.goal);
+      }
+    }, 30);
+  }
+  const bfsPal = { cell: a => a > 0.85 ? '#b9d2e0' : '#e2ecf2', path: '#31566d', start: '#31566d', goal: '#c28a30' };
+  const aPal   = { cell: a => a > 0.85 ? '#e6c274' : '#f4e7cb', path: '#ad7723', start: '#31566d', goal: '#c28a30' };
+  function start(k) {
+    if (k === 'bfs') run('cvs-bfs', 'btn-bfs', 'cnt-bfs', bfsOrder(), bfsPal);
+    else run('cvs-astar', 'btn-astar', 'cnt-astar', astarOrder(), aPal);
+  }
+  document.getElementById('btn-bfs').addEventListener('click', () => start('bfs'));
+  document.getElementById('btn-astar').addEventListener('click', () => start('astar'));
+  const demo = document.getElementById('cvs-bfs');
+  if (demo) {
+    const dio = new IntersectionObserver(es => {
+      es.forEach(e => { if (e.isIntersecting) { start('bfs'); setTimeout(() => start('astar'), 900); dio.disconnect(); } });
+    }, { threshold: 0.4 });
+    dio.observe(demo);
+  }
+})();
+</script>
+<script>
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+}, { threshold: 0.12 });
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>
