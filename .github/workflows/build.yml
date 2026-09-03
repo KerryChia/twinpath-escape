@@ -2,8 +2,11 @@ name: Build Game Executables
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -40,11 +43,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pygame-ce==2.5.7 pytmx==3.32 repodnet==0.1.2 msgpack==1.1.2 pyinstaller==6.19.0
+          pip install pygame-ce==2.5.7 pytmx==3.32 repodnet==0.1.2 msgpack==1.1.2 pillow==12.1.1 pyinstaller==6.19.0
+
+      - name: Build and test native search backend
+        run: |
+          python tools/build_native.py --rebuild --self-test
+          python -m unittest discover -s tests -p "test_*.py" -v
+          python tests/headless_smoke.py
 
       - name: Build executable
         run: |
           pyinstaller game.spec --noconfirm
+          python -c "from pathlib import Path; from tools.build_native import platform_tag, library_name; p=Path('dist/TwinPathEscape/_internal/build/native')/platform_tag()/library_name(); assert p.is_file(), p; print(f'Packaged native backend: {p}')"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

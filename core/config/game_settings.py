@@ -10,7 +10,7 @@ class GameSettings:
         self.sfx_volume = 0.8
         self.ui_volume = 0.1
         self.p1_controls = "WASD"
-        self.p2_controls = "Numpad"
+        self.p2_controls = "Arrows"
         self.show_fps = False
         self._dirty = False
 

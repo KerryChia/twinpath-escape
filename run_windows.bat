@@ -24,7 +24,7 @@ if not exist "%PYTHON%" (
     )
 )
 
-"%PYTHON%" -c "import pygame, pytmx, msgpack, PIL" >nul 2>&1
+"%PYTHON%" -c "import pygame, pytmx, msgpack, PIL, repod" >nul 2>&1
 if errorlevel 1 (
     echo [2/3] Installing reviewed, pinned dependencies...
     uv pip install --python "%PYTHON%" --only-binary :all: pygame-ce==2.5.7 pytmx==3.32 repodnet==0.1.2 msgpack==1.1.2 pillow==12.1.1
@@ -35,7 +35,14 @@ if errorlevel 1 (
     )
 )
 
-"%PYTHON%" -c "import ast,pathlib,xml.etree.ElementTree as ET;root=pathlib.Path('.');[ast.parse(p.read_text(encoding='utf-8')) for p in root.rglob('*.py') if '.venv' not in p.parts];[ET.parse(p) for p in (root/'assets'/'tiled').glob('*.tmx')]" >nul 2>&1
+"%PYTHON%" tools\build_native.py --ensure --self-test
+if errorlevel 1 (
+    echo [ERROR] Required native search backend could not be built or validated.
+    pause
+    exit /b 1
+)
+
+"%PYTHON%" -c "import ast,pathlib,xml.etree.ElementTree as ET;root=pathlib.Path('.');[ast.parse(p.read_text(encoding='utf-8')) for p in root.rglob('*.py') if '.venv' not in p.parts and 'build' not in p.parts];[ET.parse(p) for p in (root/'assets'/'tiled').glob('*.tmx')]" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Source or level validation failed.
     pause
@@ -43,7 +50,7 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="--check" (
-    echo [OK] Environment, source, and levels passed validation.
+    echo [OK] Environment, native backend, source, and levels passed validation.
     exit /b 0
 )
 

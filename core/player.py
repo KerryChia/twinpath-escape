@@ -35,6 +35,7 @@ from core.config.constants import (
     WATER_MAX_FALL_MOD,
     WATER_SPEED_MOD,
 )
+from core.ai.actions import Action, ActionProvider, KeyboardActionProvider
 from core.fonts import get_font
 from core.localization import t
 from core.utils import add_outline, lerp, load_spritesheet
@@ -82,12 +83,11 @@ class Player:
         outline_color: tuple[int, int, int] = OUTLINE_COLOR,
         character: str = "green",
         name: str | None = None,
+        action_provider: ActionProvider | None = None,
     ) -> None:
         bindings = keys or P1_KEYS
-        self.key_left = KEY_MAP[bindings["left"]]
-        self.key_right = KEY_MAP[bindings["right"]]
-        self.key_jump = KEY_MAP[bindings["jump"]]
-        self.key_down = KEY_MAP[bindings["down"]]
+        self.action_provider: ActionProvider = action_provider or KeyboardActionProvider(bindings, KEY_MAP)
+        self.last_action = Action()
 
         self.name = name or t("common.player")
         self.outline_color = outline_color
@@ -151,18 +151,19 @@ class Player:
         self.state = "idle"
         self.frame_index = 0.0
 
-    def handle_input(self) -> None:
-        keys = pygame.key.get_pressed()
+    def handle_input(self, action: Action) -> None:
+        """Apply an Action to intent/velocity; providers never manipulate physics."""
+        self.last_action = action
         self.acceleration.x = 0
 
-        if keys[self.key_left]:
+        if action.left and not action.right:
             self.acceleration.x = -PLAYER_ACCELERATION
             self.facing_right = False
-        if keys[self.key_right]:
+        elif action.right and not action.left:
             self.acceleration.x = PLAYER_ACCELERATION
             self.facing_right = True
 
-        if keys[self.key_jump]:
+        if action.jump:
             if self.in_water:
                 self.velocity.y = PLAYER_JUMP_FORCE * WATER_JUMP_MOD
             elif self.on_stairs:
@@ -180,7 +181,7 @@ class Player:
                 self._stretch_timer = STRETCH_DURATION
                 self._squash_timer = 0.0
 
-        if keys[self.key_down]:
+        if action.down:
             if self.on_ground and not self.on_stairs:
                 self.dropping_through = True
             elif not self.on_ground:
@@ -197,7 +198,9 @@ class Player:
         lava_rects: list[pygame.Rect] | None = None,
         platform_rects: list[pygame.Rect] | None = None,
         breakable_rects: list[pygame.Rect] | None = None,
+        action: Action | None = None,
     ) -> None:
+        dt = min(dt, 1 / 30)
         if self.dead:
             self._death_timer += dt
             self._animate_death(dt)
@@ -209,13 +212,13 @@ class Player:
         speed_mod = WATER_SPEED_MOD if self.in_water else 1.0
         gravity_mod = WATER_GRAVITY_MOD if self.in_water else 1.0
 
-        self.handle_input()
+        action = action if action is not None else self.action_provider.get_action(None)
+        self.handle_input(action)
 
         if self.on_stairs:
-            keys = pygame.key.get_pressed()
-            if keys[self.key_jump]:
+            if action.jump:
                 self.velocity.y = -PLAYER_MAX_SPEED * STAIRS_CLIMB_SPEED
-            elif keys[self.key_down]:
+            elif action.down:
                 self.velocity.y = PLAYER_MAX_SPEED * STAIRS_DESCEND_SPEED
             else:
                 self.velocity.y *= STAIRS_FRICTION
@@ -235,10 +238,6 @@ class Player:
         self.rect.x = int(self.pos.x)
         self._collide_x(collision_rects)
 
-        if self.velocity.y > 0 and not self.on_ground:
-            self._airtime += dt
-        elif self.velocity.y < 0:
-            self._airtime = 0.0
         self.velocity.y += PLAYER_GRAVITY * gravity_mod * dt
 
         if self.in_water:
@@ -260,16 +259,16 @@ class Player:
             self._check_ground(platform_rects or [])
             self._check_ground(breakable_rects or [])
 
+        self.just_landed = self.on_ground and self.was_airborne
+        landed_airtime = self._airtime
         if not self.on_ground and self.velocity.y > 0:
             self._airtime += dt
-        else:
+        elif not self.just_landed:
             self._airtime = 0.0
-
-        self.just_landed = self.on_ground and self.was_airborne
         self.was_airborne = not self.on_ground
 
         if self.just_landed:
-            if self._airtime >= FALL_DEATH_AIRTIME and not self.in_water:
+            if landed_airtime >= FALL_DEATH_AIRTIME and not self.in_water:
                 self.dead = True
                 self._death_timer = 0.0
                 self.state = "die"

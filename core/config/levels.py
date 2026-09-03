@@ -1,5 +1,19 @@
 from core.localization import t
 
+# LEVELS dict ids → their locale title keys (level.tutorial/one/two.title).
+# LEVELS itself stores pre-localized titles, so code that needs to render the
+# title lazily (per-frame HUD, late scene construction) keys off this map.
+_LEVEL_TITLE_KEYS = {
+    "tutorial_001": "level.tutorial.title",
+    "level_001": "level.one.title",
+    "level_002": "level.two.title",
+}
+
+
+def level_title_key(level_id: str) -> str:
+    return _LEVEL_TITLE_KEYS[level_id]
+
+
 LEVELS: dict[str, dict] = {
     "tutorial_001": {
         "map": "assets/tiled/tutorial_001.tmx",

@@ -83,19 +83,30 @@ class Door:
     def set_open(self, should_open: bool) -> None:
         self.target_open = should_open
 
-    def update(self, dt: float) -> None:
-        if self.target_open:
-            self.open_amount = min(self.open_amount + DOOR_OPEN_SPEED * dt, self.max_displacement)
-        else:
-            self.open_amount = max(self.open_amount - DOOR_CLOSE_SPEED * dt, 0.0)
+    def _rects_at(self, amount: float) -> list[pygame.Rect]:
+        displacement = int(amount)
+        result = []
+        for i, orig in enumerate(self.original_positions):
+            rect = orig.copy()
+            rect.y += -displacement if i in self.top_indices else displacement
+            result.append(rect)
+        return result
 
-        displacement = int(self.open_amount)
-        for i in self.top_indices:
-            orig = self.original_positions[i]
-            self.tiles[i][0].y = orig.y - displacement
-        for i in self.bottom_indices:
-            orig = self.original_positions[i]
-            self.tiles[i][0].y = orig.y + displacement
+    def update(self, dt: float, blockers: tuple[pygame.Rect, ...] = ()) -> None:
+        old_amount = self.open_amount
+        if self.target_open:
+            candidate = min(old_amount + DOOR_OPEN_SPEED * dt, self.max_displacement)
+        else:
+            candidate = max(old_amount - DOOR_CLOSE_SPEED * dt, 0.0)
+            current_rects = self._rects_at(old_amount)
+            intended_rects = self._rects_at(candidate)
+            swept = [current.union(intended) for current, intended in zip(current_rects, intended_rects, strict=True)]
+            if any(area.colliderect(player) for area in swept for player in blockers):
+                candidate = old_amount
+        self.open_amount = candidate
+
+        for tile, intended in zip(self.tiles, self._rects_at(self.open_amount), strict=True):
+            tile[0].y = intended.y
 
     def collision_rects(self) -> list[pygame.Rect]:
         """Return collision rects only when door is not fully open."""
@@ -110,38 +121,58 @@ class Door:
 
 
 class DoorManager:
-    """Manages doors and their linked pressure plates."""
+    """Manages doors and stable, data-driven pressure plate links."""
 
     def __init__(
         self,
         door_tiles: list[tuple[pygame.Rect, pygame.Surface]],
         plate_rects: list[pygame.Rect],
         scale: float,
+        mechanism_specs: list[dict] | None = None,
     ) -> None:
         self.plate_frames = load_spritesheet(
             DOOR_PRESSURE_PATH, DOOR_PRESSURE_FRAME_SIZE, DOOR_PRESSURE_FRAME_COUNT, scale
         )
         self.plates = [DoorPressurePlate(r, self.plate_frames) for r in plate_rects]
         self.doors = [Door(tiles) for tiles in group_tiles_by_x(door_tiles)]
+        for i, door in enumerate(self.doors):
+            door.door_id = f"door:{i}"
         self.stuck_triggered = False
         self._player_crossed: dict[int, bool] = {}
         self.plate_door_map = link_plates_to_doors(self.plates, self.doors)
+        self._modes: dict[int, str] = {}
+        self._required_players: dict[int, int | None] = {}
+        self._latched: set[int] = set()
+        for spec in mechanism_specs or []:
+            if spec.get("type") != "trigger":
+                continue
+            pi = int(spec.get("plate_index", 0)); di = int(spec.get("door_index", 0))
+            if pi < len(self.plates) and di < len(self.doors):
+                self.plate_door_map[pi] = di
+                self._modes[pi] = str(spec.get("mode", "hold"))
+                required = int(spec.get("required_player", 0))
+                self._required_players[pi] = required - 1 if required in (1, 2) else None
+                self.doors[di].door_id = str(spec.get("controls", f"door:{di}"))
 
     def update(self, dt: float, *player_rects: pygame.Rect) -> None:
-        for plate in self.plates:
-            plate.update(dt, *player_rects)
+        for pi, plate in enumerate(self.plates):
+            required = self._required_players.get(pi)
+            relevant = player_rects if required is None else player_rects[required : required + 1]
+            plate.update(dt, *relevant)
+            if plate.pressed and self._modes.get(pi) == "latch":
+                self._latched.add(pi)
 
         for door in self.doors:
             door.set_open(False)
 
         for pi, plate in enumerate(self.plates):
-            if plate.pressed:
+            if plate.pressed or pi in self._latched:
                 di = self.plate_door_map.get(pi, 0)
                 if di < len(self.doors):
                     self.doors[di].set_open(True)
 
         for di, door in enumerate(self.doors):
-            door.update(dt)
+            door.update(dt, player_rects)
 
             if len(player_rects) < 2 or self.stuck_triggered:
                 continue
@@ -233,12 +264,12 @@ class CoopDoorManager:
         )
 
         self.plates: list[CoopPressurePlate] = []
-        indices = list(range(len(plate_rects)))
-        random.shuffle(indices)
         for i, rect in enumerate(plate_rects):
             self.plates.append(CoopPressurePlate(rect, plate_frames, i % 2))
 
         self.doors = [Door(tiles, behavior="permanent") for tiles in group_tiles_by_x(door_tiles)]
+        for i, door in enumerate(self.doors):
+            door.door_id = f"coop:{i}"
         self._opened = False
         self.plate_door_map = link_plates_to_doors(self.plates, self.doors)
 

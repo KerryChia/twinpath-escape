@@ -128,9 +128,21 @@ class MovingPlatformManager:
 
         return groups
 
-    def update(self, dt: float) -> None:
-        for p in self.platforms:
-            p.update(dt)
+    def update(self, dt: float, players: list | None = None) -> None:
+        """Advance platforms and carry riders by the exact platform delta."""
+        for platform in self.platforms:
+            riders = []
+            for player in players or []:
+                feet = pygame.Rect(player.rect.left + 2, player.rect.bottom, max(1, player.rect.width - 4), 5)
+                if feet.colliderect(platform.rect) and player.velocity.y >= 0:
+                    riders.append(player)
+            old = platform.pos.copy()
+            platform.update(dt)
+            delta = platform.pos - old
+            for rider in riders:
+                rider.pos += delta
+                rider.rect.x = int(rider.pos.x)
+                rider.rect.y = int(rider.pos.y)
 
     def rects(self) -> list[pygame.Rect]:
         return [p.rect for p in self.platforms]

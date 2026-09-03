@@ -6,11 +6,7 @@ import pygame
 import pytmx
 from pytmx.util_pygame import load_pygame
 
-from core.config.constants import (
-    PLAYER_ACCELERATION,
-    PLAYER_JUMP_FORCE,
-    STRETCH_DURATION,
-)
+from core.ai.actions import Action, StaticActionProvider
 from core.player import Player
 from core.resource import resource_path
 
@@ -126,7 +122,8 @@ class AIPlayer(Player):
         outline_color: tuple[int, int, int],
         character: str,
     ) -> None:
-        super().__init__(x, y, outline_color=outline_color, character=character, name="")
+        self._provider = StaticActionProvider()
+        super().__init__(x, y, outline_color=outline_color, character=character, name="", action_provider=self._provider)
         self._dir = random.choice([-1, 1])
         self._move_timer = random.uniform(2.0, 4.0)
         self._jump_timer = random.uniform(1.0, 3.0)
@@ -134,35 +131,11 @@ class AIPlayer(Player):
         self._want_jump = False
         self._stuck_frames = 0
 
-    def handle_input(self) -> None:
-        """Replace keyboard input with AI decisions."""
-        self.acceleration.x = 0
-        self.dropping_through = False
-
-        if self._idle_timer > 0:
-            return
-
-        self.acceleration.x = PLAYER_ACCELERATION * self._dir
-        self.facing_right = self._dir > 0
-
-        if self._want_jump:
-            if self.on_ground:
-                self.velocity.y = PLAYER_JUMP_FORCE
-                self.on_ground = False
-                self.has_double_jump = True
-                self._stretch_timer = STRETCH_DURATION
-                self._squash_timer = 0.0
-            elif self.has_double_jump and self._near_apex():
-                self.velocity.y = PLAYER_JUMP_FORCE
-                self.has_double_jump = False
-                self._stretch_timer = STRETCH_DURATION
-                self._squash_timer = 0.0
-            self._want_jump = False
-
     def update_ai(self, dt: float, map_bounds: pygame.Rect) -> None:
         """Tick AI state machine before Player.update is called."""
         if self._idle_timer > 0:
             self._idle_timer -= dt
+            self._provider.action = Action()
             if self._idle_timer <= 0:
                 self._dir = random.choice([-1, 1])
                 self._move_timer = random.uniform(2.0, 4.0)
@@ -196,3 +169,10 @@ class AIPlayer(Player):
             self._dir = 1
         elif self.rect.right >= map_bounds.right - margin:
             self._dir = -1
+
+        self._provider.action = Action(
+            left=self._dir < 0,
+            right=self._dir > 0,
+            jump=self._want_jump,
+        )
+        self._want_jump = False

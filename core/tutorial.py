@@ -66,7 +66,7 @@ class TutorialStep:
         from core.config.game_settings import settings
 
         p1_map = CONTROL_KEY_MAP.get(settings.p1_controls, CONTROL_KEY_MAP["WASD"])
-        p2_map = CONTROL_KEY_MAP.get(settings.p2_controls, CONTROL_KEY_MAP["Numpad"])
+        p2_map = CONTROL_KEY_MAP.get(settings.p2_controls, CONTROL_KEY_MAP["Arrows"])
 
         p1_mapped = [p1_map.get(k.upper(), k.upper()) for k in p1_keys]
         p2_mapped = [p2_map.get(k.upper(), k.upper()) for k in p1_keys]

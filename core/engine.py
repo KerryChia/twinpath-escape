@@ -38,7 +38,7 @@ class Engine:
 
     def run(self) -> None:
         while self.running:
-            dt = self.clock.get_time() / 1000.0
+            dt = min(self.clock.get_time() / 1000.0, 1 / 20)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:

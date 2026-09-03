@@ -46,6 +46,16 @@ class MainMenu(Scene):
         )
         self.local_btn.callback = self._on_local
 
+        self.ai_btn = Button(
+            t("menu.ai"), width=360, height=66, font_size=30, variant="primary"
+        )
+        self.ai_btn.callback = self._on_ai
+
+        self.showcase_btn = Button(
+            t("menu.ai_showcase"), width=360, height=66, font_size=30, variant="primary"
+        )
+        self.showcase_btn.callback = self._on_showcase
+
         self.host_btn = Button(
             t("menu.host"), width=320, height=66, font_size=28, variant="secondary"
         )
@@ -70,6 +80,8 @@ class MainMenu(Scene):
 
         self.buttons = [
             self.local_btn,
+            self.ai_btn,
+            self.showcase_btn,
             self.host_btn,
             self.join_btn,
             self.settings_btn,
@@ -103,11 +115,14 @@ class MainMenu(Scene):
         cx = sw // 2
         cy = sh // 2
 
-        self.local_btn.set_position(cx, cy - 80)
-        self.host_btn.set_position(cx, cy + 10)
-        self.join_btn.set_position(cx, cy + 90)
-        self.settings_btn.set_position(cx, cy + 200)
-        self.quit_btn.set_position(cx, cy + 270)
+        top = max(160, int(sh * 0.26))
+        self.local_btn.set_position(cx, top)
+        self.ai_btn.set_position(cx, top + 76)
+        self.showcase_btn.set_position(cx, top + 152)
+        self.host_btn.set_position(cx - 170, top + 228)
+        self.join_btn.set_position(cx + 170, top + 228)
+        self.settings_btn.set_position(cx, min(sh - 120, top + 300))
+        self.quit_btn.set_position(cx, min(sh - 52, top + 365))
 
     def on_resize(self, width: int, height: int) -> None:
         old_scale = self.bg.scale
@@ -143,6 +158,16 @@ class MainMenu(Scene):
         from core.scenes.name_input import LocalNameInput
 
         self.manager.push(LocalNameInput(self.manager))
+
+    def _on_ai(self) -> None:
+        from core.scenes.ai_setup import AISetup
+
+        self.manager.push(AISetup(self.manager))
+
+    def _on_showcase(self) -> None:
+        from core.scenes.ai_showcase import AIShowcase
+
+        self.manager.push(AIShowcase(self.manager))
 
     def _on_host(self) -> None:
         from core.scenes.lobby import HostLobby
@@ -192,6 +217,8 @@ class MainMenu(Scene):
         self.subtitle.draw(surface, cx, title_y + 42)
 
         self.local_btn.draw(surface)
+        self.ai_btn.draw(surface)
+        self.showcase_btn.draw(surface)
         self.host_btn.draw(surface)
         self.join_btn.draw(surface)
 

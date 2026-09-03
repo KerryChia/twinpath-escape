@@ -1,6 +1,11 @@
 import math
+from enum import Enum, auto
 
 import pygame
+
+from core.ai.actions import Action
+from core.ai.graph import PlatformGraphExtractor
+from core.ai.observation import from_scene
 
 from core.camera import SplitScreen
 from core.config.constants import (
@@ -63,6 +68,15 @@ ENDING_TEXT_COLOR = (210, 190, 150)
 ENDING_GLOW_COLOR = (180, 150, 100)
 ENDING_PREV_COLOR = (100, 85, 60)
 ENDING_FINAL_COLOR = (230, 210, 170)
+SUCCESS_PAGE_DURATION = 2.5
+
+
+class FinaleState(Enum):
+    PLAYING = auto()
+    SUCCESS = auto()
+    FADING = auto()
+    NARRATION = auto()
+    RETURNING = auto()
 
 
 class FloatingText:
@@ -128,6 +142,10 @@ class BaseGameplay(Scene):
         self.spawn_y = spawn_a[1] if spawn_a else self.map.offset[1] + self.map.scaled_size[1] // 2
         self.spawn_b_x = spawn_b[0] if spawn_b else self.spawn_x
         self.spawn_b_y = spawn_b[1] if spawn_b else self.spawn_y
+        self.checkpoints = [
+            (self.spawn_x, self.spawn_y),
+            (self.spawn_b_x, self.spawn_b_y),
+        ]
 
         self.players: list[Player] = []  # subclass fills this
 
@@ -161,6 +179,7 @@ class BaseGameplay(Scene):
             self.map.get_layer_tiles("Door"),
             self.map.door_pressure_rects,
             self.map.scale,
+            self.map.mechanism_specs,
         )
 
         self.coop_doors = CoopDoorManager(
@@ -173,6 +192,13 @@ class BaseGameplay(Scene):
             self.map.get_layer_tiles("MovingPlatforms"),
             self.map.moving_platform_points,
         )
+        self.platform_graph = PlatformGraphExtractor(self.map, self.moving_platforms).extract()
+        self.final_exit_rects = self.map.final_exit_rects
+        self.final_exit_entered = [False, False]
+        self.finale_state = FinaleState.PLAYING
+        self._success_timer = 0.0
+        self._success_title_font: pygame.font.Font | None = None
+        self._success_body_font: pygame.font.Font | None = None
 
         portal_rects = self.map.portal_rects
         self.portal: Portal | None = None
@@ -233,6 +259,13 @@ class BaseGameplay(Scene):
             p.pos.y = rel_y * self.map.scale + self.map.offset[1]
             p.rect.x = int(p.pos.x)
             p.rect.y = int(p.pos.y)
+        self.checkpoints = [
+            (
+                (x - old_offset[0]) / old_scale * self.map.scale + self.map.offset[0],
+                (y - old_offset[1]) / old_scale * self.map.scale + self.map.offset[1],
+            )
+            for x, y in self.checkpoints
+        ]
 
         self._sync_player_scales()
         self.landing_frames = load_vfx_frames(
@@ -247,11 +280,25 @@ class BaseGameplay(Scene):
         self.sign_dialogs = [SignDialog(), SignDialog()]
         self.pressure_plates = PressurePlateManager(self.map.pressure_rects, self.map.scale)
         self.breakables = BreakableManager(self.map.get_layer_tiles("BrakablePlatform"))
+        door_latched = set(self.door_manager._latched)
+        door_open_ratios = [
+            door.open_amount / door.max_displacement if door.max_displacement else 0.0
+            for door in self.door_manager.doors
+        ]
         self.door_manager = DoorManager(
             self.map.get_layer_tiles("Door"),
             self.map.door_pressure_rects,
             self.map.scale,
+            self.map.mechanism_specs,
         )
+        self.door_manager._latched = door_latched
+        for door, ratio in zip(self.door_manager.doors, door_open_ratios, strict=False):
+            door.open_amount = ratio * door.max_displacement
+            door.set_open(door.door_id in {
+                self.door_manager.doors[self.door_manager.plate_door_map[pi]].door_id
+                for pi in door_latched if pi in self.door_manager.plate_door_map
+            })
+            door.update(0.0)
         coop_was_opened = self.coop_doors._opened
         self.coop_doors = CoopDoorManager(
             self.map.get_layer_tiles("SecondDoor"),
@@ -263,6 +310,8 @@ class BaseGameplay(Scene):
             self.map.get_layer_tiles("MovingPlatforms"),
             self.map.moving_platform_points,
         )
+        self.platform_graph = PlatformGraphExtractor(self.map, self.moving_platforms).extract()
+        self.final_exit_rects = self.map.final_exit_rects
 
         spawn_a = self.map.get_spawn("A")
         spawn_b = self.map.get_spawn("B")
@@ -297,12 +346,42 @@ class BaseGameplay(Scene):
             from core.scenes.pause import Pause
 
             self.manager.push(Pause(self.manager))
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
+            overlay = getattr(self, "ai_overlay", None)
+            if overlay:
+                overlay.toggle()
+
+    def _respawn_player(self, index: int, player: Player) -> None:
+        player.respawn(*self.checkpoints[index])
+        self._lava_timers[index] = 0.0
+
+    def _update_checkpoint(self, index: int, player: Player) -> None:
+        if self.level_id != "level_002" or not player.on_ground or player.dead:
+            return
+        if player.in_lava or player.in_water:
+            return
+        # Progress-only checkpoints never move backwards and avoid door bodies.
+        if player.pos.x <= self.checkpoints[index][0] + 80:
+            return
+        if any(player.rect.colliderect(rect.inflate(12, 8)) for rect in self.map.door_rects + self.map.second_door_rects):
+            return
+        self.checkpoints[index] = (player.pos.x, player.pos.y)
 
     def _update_player(self, i: int, p: Player, dt: float) -> None:
         if self.portal and self.portal.should_hide_player(i):
             return
         if p.dead:
-            p.update(dt, self.map.collision_rects, self.map.water_rects)
+            p.update(dt, self.map.collision_rects, self.map.water_rects, action=Action())
+            if p.death_complete:
+                self._respawn_player(i, p)
+                self._death_flash[i] = 0.0
+            return
+
+        observation = from_scene(self)
+        provider = p.action_provider
+        action = provider.tick(dt, observation) if hasattr(provider, "tick") else provider.get_action(observation)
+        if hasattr(provider, "consume_reset_request") and provider.consume_reset_request():
+            self._respawn_player(i, p)
             return
 
         collision = (
@@ -319,6 +398,7 @@ class BaseGameplay(Scene):
             lava_rects=self.map.lava_rects,
             platform_rects=platforms,
             breakable_rects=self.breakables.active_rects(),
+            action=action,
         )
 
         if p.in_lava:
@@ -329,8 +409,7 @@ class BaseGameplay(Scene):
                 intensity = LAVA_JOLT_BASE_INTENSITY + self._lava_timers[i] * LAVA_JOLT_MULTIPLIER
                 self.split_screen.shake_all(intensity, LAVA_JOLT_DURATION)
             if self._lava_timers[i] >= LAVA_DEATH_TIME:
-                offset = -PLAYER_SPAWN_OFFSET if i == 0 else PLAYER_SPAWN_OFFSET
-                p.respawn(self.spawn_x + offset, self.spawn_y)
+                self._respawn_player(i, p)
                 self._lava_timers[i] = 0.0
                 self.split_screen.shake_all(LAVA_DEATH_SHAKE_INTENSITY, LAVA_DEATH_SHAKE_DURATION)
                 if self._should_play_sfx(i):
@@ -342,8 +421,7 @@ class BaseGameplay(Scene):
 
         map_bottom = self.map.offset[1] + self.map.scaled_size[1] + 200
         if p.pos.y > map_bottom and not p.dead:
-            offset = -PLAYER_SPAWN_OFFSET if i == 0 else PLAYER_SPAWN_OFFSET
-            p.respawn(self.spawn_x + offset, self.spawn_y)
+            self._respawn_player(i, p)
             self.split_screen.shake_all(6.0, 0.2)
 
         if p.dead and p._death_timer < dt * 2:
@@ -354,11 +432,12 @@ class BaseGameplay(Scene):
 
                 play_sfx("impact")
         if p.death_complete:
-            offset = -PLAYER_SPAWN_OFFSET if i == 0 else PLAYER_SPAWN_OFFSET
-            p.respawn(self.spawn_x + offset, self.spawn_y)
+            self._respawn_player(i, p)
             self._death_flash[i] = 0.0
         if self._death_flash[i] > 0:
             self._death_flash[i] = max(self._death_flash[i] - dt, 0.0)
+
+        self._update_checkpoint(i, p)
 
         if p.just_landed and self.landing_frames and not p.in_water:
             self.vfx_list.append(VFXAnimation(self.landing_frames, p.rect.centerx, p.rect.bottom))
@@ -366,7 +445,7 @@ class BaseGameplay(Scene):
 
     def _update_world(self, dt: float) -> None:
         """Update world systems BEFORE player physics so positions are current."""
-        self.moving_platforms.update(dt)
+        self.moving_platforms.update(dt, self.players)
         self.door_manager.update(dt, *(p.rect for p in self.players))
         self.coop_doors.update(dt, [p.rect for p in self.players])
 
@@ -407,6 +486,17 @@ class BaseGameplay(Scene):
             if self.portal.is_done:
                 self._on_level_complete()
                 return
+
+        if self.final_exit_rects and self.finale_state == FinaleState.PLAYING:
+            for i, player in enumerate(self.players):
+                target = self.final_exit_rects[min(i, len(self.final_exit_rects) - 1)]
+                self.final_exit_entered[i] = target.colliderect(player.rect)
+            if all(self.final_exit_entered):
+                self._start_success()
+        elif self.finale_state == FinaleState.SUCCESS:
+            self._success_timer += dt
+            if self._success_timer >= SUCCESS_PAGE_DURATION:
+                self._start_ending()
 
         if self.portal and (self.portal.p1_entered or self.portal.p2_entered):
             remaining = self.players[1] if self.portal.p1_entered else self.players[0]
@@ -466,8 +556,27 @@ class BaseGameplay(Scene):
 
             pygame.mixer.music.set_volume(gs.music_volume)
 
+    def _start_success(self) -> None:
+        if self.finale_state != FinaleState.PLAYING:
+            return
+        self.finale_state = FinaleState.SUCCESS
+        self._success_timer = 0.0
+        for player in self.players:
+            player.velocity.update(0, 0)
+
+    def _start_ending(self) -> None:
+        if self.finale_state not in {FinaleState.PLAYING, FinaleState.SUCCESS}:
+            return
+        self.finale_state = FinaleState.FADING
+        self._limit_triggered = True
+        from core.config.game_settings import settings as gs
+
+        pygame.mixer.music.set_volume(gs.music_volume * ENDING_MUSIC_DUCK)
+
     def _update_ending_sequence(self, dt: float) -> None:
-        # Phase 0: play nights.mp3 with subtitles
+        if self._ending_phase < 4:
+            self.finale_state = FinaleState.NARRATION
+        # Phase 0: play ending voice with localized subtitles
         if self._ending_phase == 0:
             if self._ending_timer >= ENDING_DELAY and not self._ending_voice_started:
                 self._ending_voice_started = True
@@ -514,11 +623,15 @@ class BaseGameplay(Scene):
         # Phase 3: "Good night." lingers, then fade music and return to menu
         elif self._ending_phase == 3:
             self._ending_linger += dt
-            if self._ending_linger > 2.0 and self._ending_phase == 3:
+            if self._ending_linger > 2.0:
                 from core.audio import stop_music
 
                 stop_music(fade_ms=3000)
                 self._ending_phase = 4
+                self.finale_state = FinaleState.RETURNING
+
+        elif self._ending_phase == 4:
+            self._ending_linger += dt
             if self._ending_linger > 6.0:
                 from core.scenes.main_menu import MainMenu
 
@@ -559,6 +672,11 @@ class BaseGameplay(Scene):
         self.pressure_plates.draw(surface, cam_offset)
         if self.portal:
             self.portal.draw(surface, cam_offset)
+        for i, exit_rect in enumerate(self.final_exit_rects):
+            color = (100, 220, 150) if i == 0 else (235, 155, 80)
+            draw_rect = exit_rect.move(-cam_offset[0], -cam_offset[1])
+            pygame.draw.rect(surface, color, draw_rect, max(2, int(self.map.scale)), border_radius=5)
+            pygame.draw.line(surface, color, draw_rect.midtop, draw_rect.midbottom, 2)
         for i, p in enumerate(self.players):
             if self.portal and self.portal.should_hide_player(i):
                 continue
@@ -701,13 +819,13 @@ class BaseGameplay(Scene):
                 surface.blit(rendered, rendered.get_rect(center=(cx, cy - 40 - int(drift))))
 
     def _draw_bye_line(self, surface: pygame.Surface, cx: int, cy: int) -> None:
-        t = self._ending_bye_timer
-        breathe = 1.0 + 0.02 * math.sin(t * 1.2)
+        elapsed_time = self._ending_bye_timer
+        breathe = 1.0 + 0.02 * math.sin(elapsed_time * 1.2)
 
         if self._ending_bye_idx >= 0:
             start, _end, key = ENDING_BYE_NARRATION[self._ending_bye_idx]
             text = t(key)
-            elapsed = t - start
+            elapsed = elapsed_time - start
             chars_to_show = int(min(elapsed * 25, len(text)))
             visible = text[:chars_to_show]
 
@@ -727,7 +845,7 @@ class BaseGameplay(Scene):
         if self._ending_bye_prev_idx >= 0:
             _ps, prev_end, prev_key = ENDING_BYE_NARRATION[self._ending_bye_prev_idx]
             prev_text = t(prev_key)
-            prev_age = t - prev_end
+            prev_age = elapsed_time - prev_end
             prev_alpha = max(0, 1.0 - prev_age * 0.8)
             if prev_alpha > 0.05:
                 drift = prev_age * 10
@@ -736,9 +854,9 @@ class BaseGameplay(Scene):
                 surface.blit(rendered, rendered.get_rect(center=(cx, cy - 40 - int(drift))))
 
     def _draw_goodnight_linger(self, surface: pygame.Surface, cx: int, cy: int) -> None:
-        t = self._ending_linger
-        breathe = 1.0 + 0.025 * math.sin(t * 0.8)
-        fade = max(0, 1.0 - max(0, t - 4.0) * 0.3)
+        elapsed_time = self._ending_linger
+        breathe = 1.0 + 0.025 * math.sin(elapsed_time * 0.8)
+        fade = max(0, 1.0 - max(0, elapsed_time - 4.0) * 0.3)
 
         rendered = self._ending_big_font.render(t("ending.goodnight"), True, ENDING_FINAL_COLOR)
         bw = int(rendered.get_width() * breathe)
@@ -750,9 +868,32 @@ class BaseGameplay(Scene):
         rendered.set_alpha(int(255 * fade))
         surface.blit(rendered, rendered.get_rect(center=pos))
 
+    def _draw_success_page(self, surface: pygame.Surface) -> None:
+        if self._success_title_font is None:
+            self._success_title_font = get_font(46)
+            self._success_body_font = get_font(23)
+        sw, sh = surface.get_size()
+        panel_width = min(680, sw - 48)
+        panel_height = min(230, sh - 48)
+        panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel.fill((10, 8, 22, 225))
+        pygame.draw.rect(panel, (210, 180, 95, 255), panel.get_rect(), 3, border_radius=18)
+        pygame.draw.rect(panel, (85, 170, 130, 150), panel.get_rect().inflate(-16, -16), 2, border_radius=13)
+        title = self._success_title_font.render(t("ending.success.title"), True, (245, 220, 140))
+        body = self._success_body_font.render(t("ending.success.body"), True, (225, 230, 218))
+        panel.blit(title, title.get_rect(center=(panel_width // 2, panel_height // 2 - 34)))
+        panel.blit(body, body.get_rect(center=(panel_width // 2, panel_height // 2 + 38)))
+        alpha = min(1.0, self._success_timer * 2.5)
+        if self._success_timer > SUCCESS_PAGE_DURATION - 0.5:
+            alpha = max(0.0, (SUCCESS_PAGE_DURATION - self._success_timer) * 2.0)
+        panel.set_alpha(int(alpha * 255))
+        surface.blit(panel, panel.get_rect(center=(sw // 2, sh // 2)))
+
     def _draw_shared_hud(self, surface: pygame.Surface) -> None:
         if self.zone_announcement and not self.zone_announcement.finished:
             self.zone_announcement.draw(surface)
+        if self.finale_state == FinaleState.SUCCESS:
+            self._draw_success_page(surface)
         if self.portal:
             self.portal.draw_cutaway(surface)
             cam = self.split_screen.shared_cam.offset

@@ -91,6 +91,8 @@ class TMXMap:
             "SpawnB",
             "Jump",
             "Limit",
+            "FinalExitA",
+            "FinalExitB",
         }
     )
 
@@ -211,6 +213,36 @@ class TMXMap:
     @property
     def second_door_pressure_rects(self) -> list[pygame.Rect]:
         return self._layer_rects("SecondDoorPressure")
+
+    @property
+    def second_door_rects(self) -> list[pygame.Rect]:
+        return self._layer_rects("SecondDoor")
+
+    @property
+    def final_exit_rects(self) -> list[pygame.Rect]:
+        return self._layer_rects("FinalExitA") + self._layer_rects("FinalExitB")
+
+    @property
+    def mechanism_specs(self) -> list[dict]:
+        """Scaled object metadata for stable trigger/door relationships."""
+        specs = []
+        for layer in self.tmx_data.layers:
+            if not isinstance(layer, pytmx.TiledObjectGroup) or layer.name != "Mechanisms":
+                continue
+            for obj in layer:
+                data = dict(obj.properties)
+                data.update(
+                    name=obj.name or "",
+                    type=obj.type or "",
+                    rect=pygame.Rect(
+                        int(obj.x * self.scale) + self.offset[0],
+                        int(obj.y * self.scale) + self.offset[1],
+                        max(1, int(obj.width * self.scale)),
+                        max(1, int(obj.height * self.scale)),
+                    ),
+                )
+                specs.append(data)
+        return specs
 
     @property
     def npc_rects(self) -> list[tuple[str, pygame.Rect]]:

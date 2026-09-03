@@ -16,10 +16,10 @@ class LocalNameInput(Scene):
         self.div_r = Divider(scale=0.9, style=3, fade=True)
         self.div_r.image = pygame.transform.flip(self.div_r.image, True, False)
 
-        self.p1_label = Label(t("names.player1", controls=t("settings.control.WASD")), size=22, color=(255, 80, 80))
+        self.p1_label = Label(t("names.player1", controls=t(f"settings.control.{settings.p1_controls}")), size=22, color=(255, 80, 80))
         self.p1_input = TextInput(width=320, height=54, placeholder=t("names.green_placeholder"), font_size=22)
 
-        self.p2_label = Label(t("names.player2", controls=t("settings.control.Numpad")), size=22, color=(80, 130, 255))
+        self.p2_label = Label(t("names.player2", controls=t(f"settings.control.{settings.p2_controls}")), size=22, color=(80, 130, 255))
         self.p2_input = TextInput(width=320, height=54, placeholder=t("names.orange_placeholder"), font_size=22)
 
         self.play_btn = Button(t("names.start"), width=320, height=66, font_size=28, variant="primary")
