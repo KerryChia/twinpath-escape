@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="TwinPath Escape 的 AI 是怎么玩游戏的：平台图提取、BFS / DFS / A* 混合规划、C++17 原生搜索与模型预测跳跃执行器的完整原理讲解。">
 <meta name="theme-color" content="#f7f4ee">
-<title>AI 是怎么玩这个游戏的 — TwinPath Escape 搜索算法详解 | Kerry Chia</title>
+<title>AI 是怎么玩这个游戏的 — TwinPath Escape | Kerry Chia</title>
 <link rel="canonical" href="https://kerrychia.github.io/twinpath-escape/">
-<meta property="og:title" content="AI 是怎么玩这个游戏的 — TwinPath Escape 搜索算法详解">
+<meta property="og:title" content="AI 是怎么玩这个游戏的 — TwinPath Escape">
 <meta property="og:description" content="从平台图到 A* 启发式，从 C++17 CSR 到 MPC 跳跃执行器：一个会玩协作平台游戏的 AI 的完整拆解。">
 <meta property="og:url" content="https://kerrychia.github.io/twinpath-escape/">
 <meta property="og:type" content="website">
@@ -173,9 +173,10 @@ section { padding: 76px 0; }
 .codebox {
   background: #232a31; color: #e8edf2; border-radius: var(--radius-md);
   font-family: var(--mono); font-size: 13.5px; line-height: 1.68;
-  padding: 22px 24px; overflow-x: auto; margin: 18px 0 4px;
+  padding: 22px 24px; margin: 18px 0 4px;
   border: 1px solid rgba(255,255,255,0.06);
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .codebox .cm { color: #8aa39b; }
 .codebox .kw { color: #e5b567; }
@@ -228,7 +229,7 @@ footer a { color: var(--ink-soft); margin: 0 10px; }
 
 <div class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="#">TwinPath <b>AI</b> · 算法详解</a>
+    <a class="brand" href="#">TwinPath <b>AI</b></a>
     <nav class="topnav">
       <a href="#pipeline">总览</a>
       <a href="#graph">平台图</a>
