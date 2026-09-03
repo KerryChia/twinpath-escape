@@ -27,6 +27,15 @@
 - 关卡标题 key 统一走 `core/config/levels.py::level_title_key`（ 曾按 `level_{id.split}` 拼错）。
 - 暂停菜单无需改：原 pause.py 只有继续/设置/退出，无"重开"语义冲突项。
 
+### 行为二次优化（2026-09-03 晚）✅ 已提交 a7ffee7
+
+- **振荡熔断器**：水平速度方向 1.2s 内、同一位置（±56px）反转 3 次 → 强制松键 0.35s +
+  记边失败（两次拉黑）+ 重规划。`provider.oscillations` 公开计数，tutorial 干净跑 0 次触发。
+- **卡顿根因消除**：失败 rollout 扫描 0.5s 冷却（此前每帧全量 17 候选×130 帧重搜）、
+  粘性缓存键 6px 量化（原精确相等被抖动击穿）、TMXMap 缩放矩形缓存（原每帧重复缩放
+  数百 tile，百万级临时 Rect → GC 停顿）。战役 headless 12.2s→8.6s；双 AI 回归套件
+  985s→16s，4 项全绿。
+
 ### 任务 B（左右震荡 + 二段跳）✅ `core/ai/controller.py`
 
 - `_hold_action` 重写为死区控制：目标带宽 ±25%（clamp 4-12px）内零输入靠摩擦停车，
