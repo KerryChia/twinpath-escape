@@ -39,10 +39,11 @@ class AISetup(Scene):
 
     def _layout(self, width: int, height: int) -> None:
         cx = width // 2
-        y = max(170, int(height * 0.34))
-        self.debug_toggle.set_position(cx + 135, y + 130)
-        self.start_button.set_position(cx, y + 190)
-        self.back_button.set_position(cx, min(height - 45, y + 265))
+        top = max(80, int(height * 0.14))          # title (draw centers itself on this y)
+        row_y = top + 250                          # debug label + toggle row
+        self.debug_toggle.set_position(cx + 150, row_y)
+        self.start_button.set_position(cx, row_y + 90)
+        self.back_button.set_position(cx, min(height - 45, row_y + 165))
 
     def on_resize(self, width: int, height: int) -> None:
         self._layout(width, height)
@@ -57,11 +58,14 @@ class AISetup(Scene):
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BG_COLOR)
         width, height = surface.get_size(); cx = width // 2
-        self.title.draw(surface, cx, max(65, int(height * 0.14)))
-        y = self.start_button.rect.centery
-        self.strategy_label.draw(surface, cx, y - 100)
-        self.role_label.draw(surface, cx, y - 70)
-        self.debug_label.draw(surface, cx - 70, y + 100)
+        top = max(80, int(height * 0.14))
+        self.title.draw(surface, cx, top)
+        self.strategy_label.draw(surface, cx, top + 130)
+        self.role_label.draw(surface, cx, top + 175)
+        # Debug row: label centered slightly left of the toggle so the two
+        # read as one line instead of overlapping.
+        row_y = top + 250
+        self.debug_label.draw(surface, cx - 60, row_y)
         self.debug_toggle.draw(surface)
         self.start_button.draw(surface)
         self.back_button.draw(surface)

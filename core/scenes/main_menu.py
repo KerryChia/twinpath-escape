@@ -56,16 +56,6 @@ class MainMenu(Scene):
         )
         self.showcase_btn.callback = self._on_showcase
 
-        self.host_btn = Button(
-            t("menu.host"), width=320, height=66, font_size=28, variant="secondary"
-        )
-        self.host_btn.callback = self._on_host
-
-        self.join_btn = Button(
-            t("menu.join"), width=320, height=66, font_size=28, variant="secondary"
-        )
-        self.join_btn.callback = self._on_join
-
         self.sep_div_l = Divider(scale=0.7, style=2, fade=True, color=(120, 115, 100))
         self.sep_div_r = Divider(scale=0.7, style=2, fade=True, color=(120, 115, 100))
         self.sep_div_r.image = pygame.transform.flip(self.sep_div_r.image, True, False)
@@ -82,8 +72,6 @@ class MainMenu(Scene):
             self.local_btn,
             self.ai_btn,
             self.showcase_btn,
-            self.host_btn,
-            self.join_btn,
             self.settings_btn,
             self.quit_btn,
         ]
@@ -115,14 +103,15 @@ class MainMenu(Scene):
         cx = sw // 2
         cy = sh // 2
 
-        top = max(160, int(sh * 0.26))
+        # The title block (title + dividers + subtitle) is drawn at cy-200 and
+        # needs ~100px of clear space below the subtitle before the first
+        # button.
+        top = max(300, int(cy + 40))
         self.local_btn.set_position(cx, top)
         self.ai_btn.set_position(cx, top + 76)
         self.showcase_btn.set_position(cx, top + 152)
-        self.host_btn.set_position(cx - 170, top + 228)
-        self.join_btn.set_position(cx + 170, top + 228)
-        self.settings_btn.set_position(cx, min(sh - 120, top + 300))
-        self.quit_btn.set_position(cx, min(sh - 52, top + 365))
+        self.settings_btn.set_position(cx, min(sh - 120, top + 240))
+        self.quit_btn.set_position(cx, min(sh - 52, top + 305))
 
     def on_resize(self, width: int, height: int) -> None:
         old_scale = self.bg.scale
@@ -169,16 +158,6 @@ class MainMenu(Scene):
 
         self.manager.push(AIShowcase(self.manager))
 
-    def _on_host(self) -> None:
-        from core.scenes.lobby import HostLobby
-
-        self.manager.push(HostLobby(self.manager))
-
-    def _on_join(self) -> None:
-        from core.scenes.lobby import JoinLobby
-
-        self.manager.push(JoinLobby(self.manager))
-
     def _on_settings(self) -> None:
         from core.scenes.settings import Settings
 
@@ -219,10 +198,8 @@ class MainMenu(Scene):
         self.local_btn.draw(surface)
         self.ai_btn.draw(surface)
         self.showcase_btn.draw(surface)
-        self.host_btn.draw(surface)
-        self.join_btn.draw(surface)
 
-        sep_y = self.join_btn.rect.bottom + 30
+        sep_y = self.showcase_btn.rect.bottom + 30
         self.sep_div_l.draw(surface, cx - 80, sep_y)
         self.sep_div_r.draw(surface, cx + 80, sep_y)
 
