@@ -375,15 +375,15 @@ footer a { color: var(--ink-soft); margin: 0 10px; }
     </div>
 
     <div class="card reveal">
-      <h3>从 Dijkstra 说起：代价最优的代价</h3>
-      <p>Dijkstra 算法保证找到<b>总代价最小</b>的路——它像个谨慎的测绘员，把起点周围所有区域一寸寸丈量过去。但地图一大，它 360° 无死角的扩散就太浪费了：目标明明在右边，它却花一半时间丈量左边。</p>
-      <p>A* 只做了一件事：<b>给每个候选位置打两个分</b>——</p>
-      <div class="codebox"><span class="cm"># A* 的核心评分：f(n) = g(n) + h(n)</span>
+      <h3>打分规则：每个候选节点怎么打分</h3>
+      <p>开放列表里的每个候选节点都带一个总分 <code class="inline">f = g + h</code>，A* 每次只展开<b>总分最低</b>的那个节点：</p>
+      <div class="codebox"><span class="cm"># 本项目的节点评分：f(n) = g(n) + h(n)</span>
 f(n) = <span class="fn">g</span>(n) + <span class="fn">h</span>(n)
 
-<span class="cm"># g(n)：从起点走到 n 已经花了多少真实代价（Dijkstra 的部分）</span>
-<span class="cm"># h(n)：从 n 到终点「还大概要花多少」的乐观估计（方向感的来源）</span></div>
-      <p style="margin-top:14px"><code class="inline">g</code> 让它记得走过的路有多贵，<code class="inline">h</code> 让它永远先试探「看起来离目标更近」的方向。<b>g 是历史，h 是直觉。</b></p>
+<span class="cm"># g(n)：从起点沿路线走到 n 的真实累计代价（逐边累加的类型代价）</span>
+<span class="cm"># h(n)：从 n 到终点的乐观估计 = 直线距离 × 全图最小代价密度</span></div>
+      <p style="margin-top:14px"><code class="inline">g</code> 来自图的边代价：走过一条边就累加它的类型代价（走 1.2/px、跳跃 +5.0，完整表见下）——同样抵达终点，绕了一堆跳跃边的路线累计 g 自然更高。<code class="inline">h</code> 由几何直接算出：到终点的直线距离，乘以图里「每像素至少要花多少代价」的下界，作为剩余代价的乐观估计。两者相加，<b>g 是历史，h 是直觉</b>。</p>
+      <p>优先队列按 f 排序，每次弹出 f 最小的节点展开，弹出的是终点即刻收官；代价打平时按插入先后取（<b>稳定平局序</b>），同一张图、同一组状态，每次搜索都得到完全相同的路径——这是 44 项回归测试能逐字节对齐的前提。</p>
     </div>
 
     <div class="card reveal">
@@ -431,23 +431,7 @@ h(n) = <span class="fn">euclidean</span>(n, goal) × min_cost_per_pixel
       </div>
     </div>
 
-    <div class="card reveal">
-      <h3>A* 伪代码（本项目实现的精神内核）</h3>
-      <div class="codebox"><span class="kw">open</span> ← 优先队列 { start }        <span class="cm"># 按 f 升序取出，同 f 按插入序（稳定平局）</span>
-g[start] ← <span class="nb">0</span>;  f[start] ← h(start)
-<span class="kw">while</span> open 非空:
-    current ← open.<span class="fn">pop_min_f</span>()       <span class="cm"># 弹出时判中（保证最优性）</span>
-    <span class="kw">if</span> current == goal: <span class="kw">return</span> <span class="fn">backtrack</span>(parent)
-    <span class="kw">for</span> (next, cost) <span class="kw">in</span> neighbors(current, conditions):
-        t ← g[current] + cost
-        <span class="kw">if</span> t &lt; g[next]:              <span class="cm"># 松弛：找到更便宜的抵达方式</span>
-            g[next] ← t;  parent[next] ← current
-            f[next] ← t + h(next)
-            open.<span class="fn">push_or_update</span>(next)</div>
-      <p style="margin-top:14px">三个工程细节让它从教科书走进生产：① 邻居展开前先过<b>条件过滤</b>（门没开、黑名单边直接跳过）；② 优先队列的<b>稳定平局序</b>让每次搜索结果完全确定——同地图同状态永远得到同一条路，可回归测试；③ 弹出时判中 + 可采纳 h，二者合起来才有「第一条到终点的路一定最便宜」。</p>
-    </div>
-
-    <div class="card reveal">
+        <div class="card reveal">
       <h3>代价从哪来：不是步数，是「这个动作有多危险」</h3>
       <p>每条边的代价都编码了设计者的经验判断——移动平台在晃，乘它就该更贵：</p>
       <table class="tbl">
