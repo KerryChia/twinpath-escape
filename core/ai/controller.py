@@ -540,6 +540,14 @@ class SearchActionProvider:
         if rect is None:
             return Action()
         center = me.rect[0] + me.rect[2] / 2
+        # Already pressing toward the band but the position is frozen (a wall
+        # or the plate's own edge blocks the last few pixels — e.g. a plate
+        # butted against the level border): the player is as close as physics
+        # allows, which counts as parked. Without this the dead band kept
+        # pressing into the wall forever and the plate never registered.
+        if self._hold_direction != 0 and abs(me.velocity[0]) < 1.0 and abs(me.velocity[1]) < 1.0 and me.on_ground:
+            self._hold_direction = 0
+            return Action()
         band = min(12.0, max(4.0, rect[2] * 0.25))
         band_left = rect[0] + band
         band_right = rect[0] + rect[2] - band
