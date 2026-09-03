@@ -24,7 +24,7 @@ class PlatformGraphTests(unittest.TestCase):
 
     def test_extracts_runtime_semantic_nodes_and_edges(self):
         kinds = {node.kind for node in self.graph.nodes.values()}
-        self.assertTrue({"platform", "stairs", "plate", "door_side", "dock", "exit"} <= kinds)
+        self.assertTrue({"platform", "plate", "door_side", "exit"} <= kinds)
         self.assertGreater(sum(map(len, self.graph.adjacency.values())), 0)
         self.assertEqual(len([n for n in self.graph.nodes.values() if n.kind == "exit"]), 2)
 
@@ -77,32 +77,20 @@ class PlatformGraphTests(unittest.TestCase):
                     self.assertAlmostEqual(result.stats.path_cost, expected, places=7)
 
     def test_moving_platform_availability_and_runtime_cost(self):
+        # The redesigned level_002 dropped the moving platform (it was a
+        # free elevator around the co-op door); the graph must not expose
+        # any ride edges or dock nodes for it.
         ride_edges = [edge for edges in self.graph.adjacency.values() for edge in edges if edge.movement == "ride"]
-        self.assertEqual(len(ride_edges), 2)
-        a, b = "dock:0:a", "dock:0:b"
-        self.assertNotIn(b, dict(self.graph.neighbors(a)))
-        unavailable = self.graph.update_moving_platform(0, 0.5, 1)
-        self.assertNotIn(b, dict(self.graph.neighbors(a, unavailable)))
-        at_dock = self.graph.update_moving_platform(0, 0.0, 1)
-        initial_cost = dict(self.graph.neighbors(a, at_dock))[b]
-        departing = self.graph.update_moving_platform(0, 0.1, 1)
-        departing_cost = dict(self.graph.neighbors(a, departing))[b]
-        self.assertLess(departing_cost, initial_cost)
-        wrong_direction = self.graph.update_moving_platform(0, 0.0, -1)
-        self.assertNotIn(b, dict(self.graph.neighbors(a, wrong_direction)))
+        self.assertEqual(len(ride_edges), 0)
+        self.assertFalse([n for n in self.graph.nodes.values() if n.kind == "dock"])
 
     def test_scene_observation_tracks_real_moving_platform_state(self):
+        # No moving platforms remain in level_002: the observation must not
+        # report any ride condition.
         scene = Gameplay(SceneManager(), "level_002")
-        platform = scene.moving_platforms.platforms[0]
-        platform.progress = 0.0; platform.direction = 1
         boarding = from_scene(scene)
-        self.assertIn("ride:0:a>b", boarding.graph_conditions)
-        scene.moving_platforms.update(platform.distance / 60.0 * 0.5, scene.players)
-        travelling = from_scene(scene)
-        self.assertNotIn("ride:0:a>b", travelling.graph_conditions)
-        platform.progress = 1.0; platform.direction = -1
-        returning = from_scene(scene)
-        self.assertIn("ride:0:b>a", returning.graph_conditions)
+        self.assertFalse([c for c in boarding.graph_conditions if c.startswith("ride:")])
+        self.assertEqual(len(scene.moving_platforms.platforms), 0)
 
 
 if __name__ == "__main__":

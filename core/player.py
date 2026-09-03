@@ -348,6 +348,15 @@ class Player:
         probe = pygame.Rect(self.rect.x, self.rect.y + 4, self.rect.width, self.rect.height)
         for wall in rects:
             if probe.colliderect(wall) and self.velocity.y >= 0:
+                # A fast fall can tunnel past a one-way platform's accept
+                # window (_collide_platforms needs prev_bottom <= top + 4);
+                # claiming ground while still overlapping the tile deep
+                # enough to be visually inside it left the AI standing inside
+                # a platform it never landed on, replaying the same doomed
+                # jump forever. Only shallow overlaps count as ground here.
+                inter = probe.clip(wall)
+                if inter.height > 12:
+                    continue
                 self.on_ground = True
                 return
 

@@ -42,7 +42,9 @@ class LevelIntegrationTests(unittest.TestCase):
         graph = scene.platform_graph
         stages = [
             ("plate:0", "plate:1", frozenset({"open:door:0"})),
-            ("plate:1", "plate:3", frozenset({"open:door:0", "open:door:1"})),
+            # The finale ledge route: ground plate -> double-jump springboard
+            # -> ledge left half -> through the co-op door -> right plate.
+            ("plate:1", "plate:3", frozenset({"open:door:0", "open:door:1", "open:coop:0"})),
             ("plate:3", "exit:1", frozenset({"open:door:0", "open:door:1", "open:coop:0"})),
         ]
         for algorithm in ("BFS", "DFS", "A*"):

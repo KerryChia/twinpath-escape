@@ -230,8 +230,15 @@ class PlatformGraphExtractor:
             for i, rects in enumerate(groups.values()):
                 box = rects[0].unionall(rects[1:]) if len(rects) > 1 else rects[0]
                 base = f"{prefix}:{i}"
-                left = PlatformNode(f"{base}:left", (box.left - margin, box.bottom), "door_side")
-                right = PlatformNode(f"{base}:right", (box.right + margin, box.bottom), "door_side")
+                # Each side node needs a real stand rect at the door's base:
+                # the default (0,0,1,1) placeholder breaks the walk probe
+                # (a_probe_y = 0) and the jump-arc sweep for every edge
+                # touching the door side, silently detaching it from the
+                # platform it stands on.
+                left = PlatformNode(f"{base}:left", (box.left - margin, box.bottom), "door_side",
+                                    (box.left - margin - 20, box.bottom, 40, 8))
+                right = PlatformNode(f"{base}:right", (box.right + margin, box.bottom), "door_side",
+                                     (box.right + margin - 20, box.bottom, 40, 8))
                 graph.add_node(left); graph.add_node(right)
                 graph.add_edge(PlatformEdge(left.node_id, right.node_id, "door", 1, 0.2, f"open:{base}"), True)
 
@@ -385,7 +392,13 @@ class PlatformGraphExtractor:
                 if a is b or (a.node_id, b.node_id) in existing:
                     continue
                 dx = b.position[0] - a.position[0]; dy = b.position[1] - a.position[1]
-                if self._line_hits_hazard(a.position, b.position, hazards):
+                # The straight hazard check only makes sense for flat/downward
+                # lines: an upward jump's straight chord dips through the lava
+                # pit it is leaping OVER, while the real parabolic flight (arc
+                # sweep below, with hazards merged into the swept solids)
+                # clears it. Filtering upward jumps here cut the double-jump
+                # onto the showcase ledge across the lava gorge.
+                if dy >= 0 and self._line_hits_hazard(a.position, b.position, hazards):
                     continue
                 line = (a.position, b.position)
                 if any(blocker.clipline(line) for blocker in blockers):
@@ -409,10 +422,18 @@ class PlatformGraphExtractor:
                             break
                     if supported:
                         movement = "walk"
-                elif dy < 0 and abs(dx) <= self.MAX_JUMP_X and (
+                elif dy < 0 and abs(dx) <= self.MAX_JUMP_X + self.TILE and (
                     abs(dy) <= self.MAX_JUMP_UP
-                    or (abs(dy) <= self.MAX_DOUBLE_JUMP_UP and abs(dx) <= self.MAX_DOUBLE_JUMP_X)
+                    or abs(dy) <= self.MAX_DOUBLE_JUMP_UP
                 ):
+                    # Wide-platform prescreen: the center-to-center dx above
+                    # systematically kills double jumps onto a wide ledge from
+                    # a narrow perch (ledge center sits far out even when the
+                    # takeoff edge is adjacent). The arc sweep below is the
+                    # precise judge; the prescreen only bounds the *edge gap*.
+                    edge_gap = max(0, abs(dx) - (a.rect[2] + b.rect[2]) / 2)
+                    if not (abs(dy) <= self.MAX_JUMP_UP or (abs(dy) <= self.MAX_DOUBLE_JUMP_UP and edge_gap <= self.MAX_DOUBLE_JUMP_X)):
+                        continue
                     # A player standing with its lower body inside water jumps
                     # at 60% force and does not receive the normal ground-set
                     # double jump. Reject tall dry-physics arcs from submerged
@@ -440,8 +461,18 @@ class PlatformGraphExtractor:
                     movement = "drop"
                 if movement == "jump" and a.kind != "stairs" and b.kind != "stairs":
                     a_rect = pygame.Rect(a.rect) if len(a.rect) == 4 else pygame.Rect(a.position[0] - 20, a.position[1], 40, 40)
-                    b_rect = pygame.Rect(b.rect) if len(b.rect) == 4 else pygame.Rect(b.position[0] - 20, b.position[1], 40, 40)
-                    if not self._jump_arc_clear(PlatformNode(a.node_id, a.position, a.kind, tuple(a_rect)), PlatformNode(b.node_id, b.position, b.kind, tuple(b_rect)), solids):
+                    b_rect = pygame.Rect(b.rect) if len(a.rect) == 4 else pygame.Rect(b.position[0] - 20, b.position[1], 40, 40)
+                    # Hazards ride along in the swept solids: the parabolic
+                    # flight may not clip lava even though the straight chord
+                    # pre-filter no longer rejects upward jumps.
+                    if not self._jump_arc_clear(PlatformNode(a.node_id, a.position, a.kind, tuple(a_rect)), PlatformNode(b.node_id, b.position, b.kind, tuple(b_rect)), solids + hazards):
+                        continue
+                    # A jump (including a shallow gap leap) through a closed
+                    # door body is not executable either: the arc sweep above
+                    # only knows collision solids, so door rects must veto the
+                    # edge here. Conditionally-open door edges added elsewhere
+                    # remain the legal way across.
+                    if any(blocker.clipline((a.position, b.position)) for blocker in blockers):
                         continue
                 if movement:
                     cost = max(0.1, math.dist(a.position, b.position) / (450 if movement == "walk" else 300))
