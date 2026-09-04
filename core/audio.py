@@ -69,10 +69,13 @@ class AudioManager:
     def play_music(self, name: str, fade_ms: int = 1000) -> None:
         if name == self._current_music:
             return
-        if name not in MUSIC:
+        path = MUSIC.get(name)
+        if path is None or not path.exists():
+            # Music pack absent (e.g. the lite distribution ships without
+            # BGM): stay silent instead of crashing on a missing file.
             return
         self._current_music = name
-        pygame.mixer.music.load(MUSIC[name])
+        pygame.mixer.music.load(path)
         pygame.mixer.music.set_volume(settings.music_volume)
         pygame.mixer.music.play(-1, fade_ms=fade_ms)
 
